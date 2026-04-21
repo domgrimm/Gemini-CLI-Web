@@ -42,8 +42,13 @@ function ToolsSettings({ isOpen, onClose }) {
   const [mcpServerTools, setMcpServerTools] = useState({});
   const [mcpToolsLoading, setMcpToolsLoading] = useState({});
   const [activeTab, setActiveTab] = useState('tools');
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState('auto-gemini-3');
   const [enableNotificationSound, setEnableNotificationSound] = useState(false);
+  
+  // Quick settings integrated state
+  const [autoExpandTools, setAutoExpandTools] = useState(false);
+  const [showRawParameters, setShowRawParameters] = useState(false);
+  const [autoScrollToBottom, setAutoScrollToBottom] = useState(true);
 
   // Common tool patterns
   const commonTools = [
@@ -65,8 +70,14 @@ function ToolsSettings({ isOpen, onClose }) {
   
   // Available Gemini models (tested and verified)
   const availableModels = [
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Fast and efficient latest model (Recommended)' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Most advanced model (Note: May have quota limits)' }
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)', description: 'Most advanced next-gen model' },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (Preview)', description: 'Next-gen speed and efficiency' },
+    { value: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite (Preview)', description: 'Ultra-fast next-gen lite model' },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Advanced reasoning and large context' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Optimal balance of speed and power' },
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', description: 'Fastest Gemini 2.5 model' },
+    { value: 'auto-gemini-3', label: 'Gemini 3 Auto', description: 'Automatically select best Gemini 3 model' },
+    { value: 'auto-gemini-2.5', label: 'Gemini 2.5 Auto', description: 'Automatically select best Gemini 2.5 model' }
   ];
 
   // MCP API functions
@@ -296,14 +307,26 @@ function ToolsSettings({ isOpen, onClose }) {
         setDisallowedTools(settings.disallowedTools || []);
         setSkipPermissions(settings.skipPermissions || false);
         setProjectSortOrder(settings.projectSortOrder || 'name');
-        setSelectedModel(settings.selectedModel || 'gemini-2.5-flash');
+        setSelectedModel(settings.selectedModel || 'auto-gemini-3');
         setEnableNotificationSound(settings.enableNotificationSound || false);
+        
+        // Load quick settings from either integrated or individual storage
+        setAutoExpandTools(settings.autoExpandTools !== undefined ? settings.autoExpandTools : 
+          JSON.parse(localStorage.getItem('autoExpandTools') || 'false'));
+        setShowRawParameters(settings.showRawParameters !== undefined ? settings.showRawParameters : 
+          JSON.parse(localStorage.getItem('showRawParameters') || 'false'));
+        setAutoScrollToBottom(settings.autoScrollToBottom !== undefined ? settings.autoScrollToBottom : 
+          JSON.parse(localStorage.getItem('autoScrollToBottom') || 'true'));
       } else {
         // Set defaults
         setAllowedTools([]);
         setDisallowedTools([]);
         setSkipPermissions(false);
         setProjectSortOrder('name');
+        setSelectedModel('auto-gemini-3');
+        setAutoExpandTools(false);
+        setShowRawParameters(false);
+        setAutoScrollToBottom(true);
       }
 
       // Load MCP servers from API
@@ -330,12 +353,20 @@ function ToolsSettings({ isOpen, onClose }) {
         projectSortOrder,
         selectedModel,
         enableNotificationSound,
+        autoExpandTools,
+        showRawParameters,
+        autoScrollToBottom,
         lastUpdated: new Date().toISOString()
       };
       
       
       // Save to localStorage
       localStorage.setItem('gemini-tools-settings', JSON.stringify(settings));
+      
+      // Also sync back to individual items for components that still use them
+      localStorage.setItem('autoExpandTools', JSON.stringify(autoExpandTools));
+      localStorage.setItem('showRawParameters', JSON.stringify(showRawParameters));
+      localStorage.setItem('autoScrollToBottom', JSON.stringify(autoScrollToBottom));
       
       // Trigger storage event for current window
       window.dispatchEvent(new StorageEvent('storage', {
@@ -580,70 +611,143 @@ function ToolsSettings({ isOpen, onClose }) {
             {/* Appearance Tab */}
             {activeTab === 'appearance' && (
               <div className="space-y-6 md:space-y-8">
-                {activeTab === 'appearance' && (
-  <div className="space-y-6 md:space-y-8">
-    {/* Theme Settings */}
-    <div className="space-y-4">
-      <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4 neumorphic dark:neumorphic-dark">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium text-foreground">
-              Dark Mode
-            </div>
-            <div className="text-sm text-muted-foreground">
-              Toggle between light and dark themes
-            </div>
-          </div>
-          <button
-            onClick={toggleDarkMode}
-            className="relative inline-flex h-8 w-14 items-center rounded-full bg-zinc-200 dark:bg-zinc-700 transition-all duration-300 focus:outline-hidden focus:ring-2 focus:ring-gemini-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900 morph-hover"
-            role="switch"
-            aria-checked={isDarkMode}
-            aria-label="Toggle dark mode"
-          >
-            <span className="sr-only">Toggle dark mode</span>
-            <span
-              className={`${
-                isDarkMode ? 'translate-x-7' : 'translate-x-1'
-              } inline-block h-6 w-6 transform rounded-full bg-white shadow-lg transition-transform duration-200 items-center justify-center`}
-            >
-              {isDarkMode ? (
-                <Moon className="w-3.5 h-3.5 text-zinc-700" />
-              ) : (
-                <Sun className="w-3.5 h-3.5 text-yellow-500" />
-              )}
-            </span>
-          </button>
-        </div>
-      </div>
-    </div>
+                {/* Theme Settings */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Moon className="w-5 h-5 text-zinc-500" />
+                    <h3 className="text-lg font-medium text-foreground">Theme & Interface</h3>
+                  </div>
+                  <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="font-semibold text-foreground flex items-center gap-2">
+                          {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-yellow-500" />}
+                          Dark Mode
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Currently using {isDarkMode ? 'Dark' : 'Light'} theme
+                        </div>
+                      </div>
+                      <button
+                        onClick={toggleDarkMode}
+                        className={`relative inline-flex h-9 w-16 items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-gemini-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900 ${
+                          isDarkMode ? 'bg-zinc-700' : 'bg-zinc-200'
+                        }`}
+                        role="switch"
+                        aria-checked={isDarkMode}
+                      >
+                        <span className="sr-only">Toggle dark mode</span>
+                        <div
+                          className={`flex items-center justify-center h-7 w-7 transform rounded-full bg-white shadow-md transition-transform duration-300 ${
+                            isDarkMode ? 'translate-x-8' : 'translate-x-1'
+                          }`}
+                        >
+                          {isDarkMode ? (
+                            <Moon className="w-4 h-4 text-zinc-800" />
+                          ) : (
+                            <Sun className="w-4 h-4 text-yellow-500" />
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-    {/* Project Sorting */}
-    <div className="space-y-4">
-      <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium text-foreground">
-              Project Sorting
-            </div>
-            <div className="text-sm text-muted-foreground">
-              How projects are ordered in the sidebar
-            </div>
-          </div>
-          <select
-            value={projectSortOrder}
-            onChange={(e) => setProjectSortOrder(e.target.value)}
-            className="text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-gemini-500 focus:border-gemini-500 p-2 w-32"
-          >
-            <option value="name">Alphabetical</option>
-            <option value="date">Recent Activity</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+                {/* Chat Settings */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Edit3 className="w-5 h-5 text-zinc-500" />
+                    <h3 className="text-lg font-medium text-foreground">Chat Behavior</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-medium text-foreground">Auto-scroll to Bottom</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Scroll Control</div>
+                      </div>
+                      <button
+                        onClick={() => setAutoScrollToBottom(!autoScrollToBottom)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          autoScrollToBottom ? 'bg-gemini-500' : 'bg-zinc-300 dark:bg-zinc-600'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoScrollToBottom ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
 
+                    <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-medium text-foreground">Auto-expand Tools</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Tool Visibility</div>
+                      </div>
+                      <button
+                        onClick={() => setAutoExpandTools(!autoExpandTools)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          autoExpandTools ? 'bg-gemini-500' : 'bg-zinc-300 dark:bg-zinc-600'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoExpandTools ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+
+                    <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-medium text-foreground">Show Raw Parameters</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Debugging</div>
+                      </div>
+                      <button
+                        onClick={() => setShowRawParameters(!showRawParameters)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          showRawParameters ? 'bg-gemini-500' : 'bg-zinc-300 dark:bg-zinc-600'
+                        }`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showRawParameters ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Project Sorting */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Settings className="w-5 h-5 text-zinc-500" />
+                    <h3 className="text-lg font-medium text-foreground">Organization</h3>
+                  </div>
+                  <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <div className="font-medium text-foreground">
+                          Project Sorting
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Choose how your project list is ordered
+                        </div>
+                      </div>
+                      <div className="flex bg-zinc-200 dark:bg-zinc-800 p-1 rounded-lg">
+                        <button
+                          onClick={() => setProjectSortOrder('name')}
+                          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${
+                            projectSortOrder === 'name' 
+                              ? 'bg-white dark:bg-zinc-700 text-foreground shadow-sm' 
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          Alphabetical
+                        </button>
+                        <button
+                          onClick={() => setProjectSortOrder('date')}
+                          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${
+                            projectSortOrder === 'date' 
+                              ? 'bg-white dark:bg-zinc-700 text-foreground shadow-sm' 
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          Recent Activity
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

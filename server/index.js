@@ -53,51 +53,34 @@ const connectedClients = new Set();
 // Setup file system watcher for Gemini projects folder using chokidar
 async function setupProjectsWatcher() {
   const chokidar = (await import('chokidar')).default;
-  const geminiProjectsPath = path.join(process.env.HOME, '.gemini', 'projects');
+  const geminiConfigPath = path.join(process.env.HOME, '.gemini', 'projects.json');
   
   if (projectsWatcher) {
     projectsWatcher.close();
   }
   
   try {
-    // Initialize chokidar watcher with optimized settings
-    projectsWatcher = chokidar.watch(geminiProjectsPath, {
-      ignored: [
-        '**/node_modules/**',
-        '**/.git/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/*.tmp',
-        '**/*.swp',
-        '**/.DS_Store'
-      ],
+    // Watch projects.json for changes
+    projectsWatcher = chokidar.watch(geminiConfigPath, {
       persistent: true,
-      ignoreInitial: true, // Don't fire events for existing files on startup
-      followSymlinks: false,
-      depth: 10, // Reasonable depth limit
+      ignoreInitial: true,
       awaitWriteFinish: {
-        stabilityThreshold: 100, // Wait 100ms for file to stabilize
+        stabilityThreshold: 100,
         pollInterval: 50
       }
     });
 
-    // Debounce function to prevent excessive notifications
     let debounceTimer;
-    const debouncedUpdate = async (eventType, filePath) => {
+    const debouncedUpdate = async () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         try {
-          // Clear project directory cache when files change
           clearProjectDirectoryCache();
-          // Get updated projects list
           const updatedProjects = await getProjects();
-          // Notify all connected clients about the project changes
           const updateMessage = JSON.stringify({
             type: 'projects_updated',
             projects: updatedProjects,
-            timestamp: new Date().toISOString(),
-            changeType: eventType,
-            changedFile: path.relative(geminiProjectsPath, filePath)
+            timestamp: new Date().toISOString()
           });
           connectedClients.forEach(client => {
             if (client.readyState === client.OPEN) {
@@ -107,20 +90,10 @@ async function setupProjectsWatcher() {
         } catch (error) {
           // console.error('❌ Error handling project changes:', error);
         }
-      }, 300); // 300ms debounce (slightly faster than before)
+      }, 500);
     };
-    // Set up event listeners
-    projectsWatcher
-      .on('add', (filePath) => debouncedUpdate('add', filePath))
-      .on('change', (filePath) => debouncedUpdate('change', filePath))
-      .on('unlink', (filePath) => debouncedUpdate('unlink', filePath))
-      .on('addDir', (dirPath) => debouncedUpdate('addDir', dirPath))
-      .on('unlinkDir', (dirPath) => debouncedUpdate('unlinkDir', dirPath))
-      .on('error', (error) => {
-        // console.error('❌ Chokidar watcher error:', error);
-      })
-      .on('ready', () => {
-      });
+
+    projectsWatcher.on('all', debouncedUpdate);
   } catch (error) {
     // console.error('❌ Failed to setup projects watcher:', error);
   }
@@ -213,17 +186,11 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 
 app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
   try {
-    // Extract the actual project directory path
-    const projectPath = await extractProjectDirectory(req.params.projectName);
-    // Get sessions from sessionManager
-    const sessions = sessionManager.getProjectSessions(projectPath);
-    // Apply pagination
+    const { projectName } = req.params;
     const { limit = 5, offset = 0 } = req.query;
-    const paginatedSessions = sessions.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-    res.json({
-      sessions: paginatedSessions,
-      total: sessions.length
-    });
+    
+    const result = await getSessions(projectName, parseInt(limit), parseInt(offset));
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -255,7 +222,14 @@ app.put('/api/projects/:projectName/rename', authenticateToken, async (req, res)
 app.delete('/api/projects/:projectName/sessions/:sessionId', authenticateToken, async (req, res) => {
   try {
     const { projectName, sessionId } = req.params;
+    // Delete from UI session manager
     await sessionManager.deleteSession(sessionId);
+    // Delete from Gemini CLI history
+    try {
+      await deleteSession(projectName, sessionId);
+    } catch (e) {
+      // console.warn('Failed to delete session from CLI history:', e.message);
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -273,6 +247,77 @@ app.delete('/api/projects/:projectName', authenticateToken, async (req, res) => 
   }
 });
 
+// Directory browsing endpoint
+app.get('/api/browse-directories', authenticateToken, async (req, res) => {
+  try {
+    const { dirPath = process.env.HOME || '/' } = req.query;
+    const absolutePath = path.resolve(dirPath.replace('~', os.homedir()));
+    
+    // Security: Check if path exists and is a directory
+    const stats = await fsPromises.stat(absolutePath);
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Not a directory' });
+    }
+
+    const entries = await fsPromises.readdir(absolutePath, { withFileTypes: true });
+    
+    // Check if each directory is a Gemini project (contains .gemini folder or is in projects.json)
+    const projectsConfigPath = path.join(os.homedir(), '.gemini', 'projects.json');
+    let knownProjects = new Set();
+    try {
+      if (fsSync.existsSync(projectsConfigPath)) {
+        const config = JSON.parse(fsSync.readFileSync(projectsConfigPath, 'utf8'));
+        if (config.projects) {
+          knownProjects = new Set(Object.keys(config.projects).map(p => path.resolve(p.replace('~', os.homedir()))));
+        }
+      }
+    } catch (e) {}
+
+    const directories = [];
+    
+    // Add parent directory option if not at root
+    const parentDir = path.dirname(absolutePath);
+    if (parentDir !== absolutePath) {
+      directories.push({
+        name: '..',
+        path: parentDir,
+        isParent: true
+      });
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const fullPath = path.join(absolutePath, entry.name);
+        let isGeminiProject = false;
+        
+        // Check for .gemini folder
+        try {
+          await fsPromises.access(path.join(fullPath, '.gemini'));
+          isGeminiProject = true;
+        } catch (e) {}
+
+        // Check if already in projects.json
+        if (knownProjects.has(fullPath)) {
+          isGeminiProject = true;
+        }
+
+        directories.push({
+          name: entry.name,
+          path: fullPath,
+          isGeminiProject
+        });
+      }
+    }
+
+    res.json({
+      currentPath: absolutePath,
+      directories: directories.sort((a, b) => a.name.localeCompare(b.name))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Create project endpoint
 app.post('/api/projects/create', authenticateToken, async (req, res) => {
   try {
@@ -283,7 +328,6 @@ app.post('/api/projects/create', authenticateToken, async (req, res) => {
     const project = await addProjectManually(projectPath.trim());
     res.json({ success: true, project });
   } catch (error) {
-    // console.error('Error creating project:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -394,28 +438,29 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
 
 app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) => {
   try {
-    // Using fsPromises from import
-    // Use extractProjectDirectory to get the actual project path
+    const { projectName } = req.params;
     let actualPath;
     try {
-      actualPath = await extractProjectDirectory(req.params.projectName);
+      actualPath = await extractProjectDirectory(projectName);
     } catch (error) {
-      // console.error('Error extracting project directory:', error);
-      // Fallback to simple dash replacement
-      actualPath = req.params.projectName.replace(/-/g, '/');
+      actualPath = projectName.replace(/-/g, '/');
     }
+    
+    console.log(`📂 Fetching file tree for project: ${projectName} at path: ${actualPath}`);
+    
     // Check if path exists
     try {
       await fsPromises.access(actualPath);
     } catch (e) {
+      console.error(`❌ Project path not found: ${actualPath}`);
       return res.status(404).json({ error: `Project path not found: ${actualPath}` });
     }
 
     const files = await getFileTree(actualPath, 3, 0, true);
-    const hiddenFiles = files.filter(f => f.name.startsWith('.'));
+    console.log(`✅ Found ${files.length} top-level items for ${projectName}`);
     res.json(files);
   } catch (error) {
-    // console.error('❌ File tree error:', error.message);
+    console.error(`❌ File tree error for ${req.params.projectName}:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -852,7 +897,13 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
   // Using fsPromises from import
   const items = [];
   try {
+    if (currentDepth === 0) {
+      console.log(`🔍 getFileTree: Reading directory ${dirPath}`);
+    }
     const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
+    if (currentDepth === 0) {
+      console.log(`🔍 getFileTree: Found ${entries.length} raw entries`);
+    }
     for (const entry of entries) {
       // Debug: log all entries including hidden files
       // Skip only heavy build directories
@@ -918,16 +969,26 @@ const PORT = process.env.PORT || 4008;
 // Initialize database and start server
 async function startServer() {
   try {
+    console.log('🚀 Starting Gemini CLI UI server...');
+    
     // Initialize authentication database
     await initializeDatabase();
-    // console.log('✅ Database initialization skipped (testing)');
-    server.listen(PORT, '0.0.0.0', async () => {
-      // console.log(`Gemini CLI UI server running on http://0.0.0.0:${PORT}`);
+    console.log('✅ Database initialized');
+    
+    server.listen(PORT, '0.0.0.0', () => {
+      const address = server.address();
+      console.log(`✨ Server listening on http://0.0.0.0:${PORT}`);
+      console.log(`✨ Local: http://localhost:${PORT}`);
+      
       // Start watching the projects folder for changes
-      await setupProjectsWatcher(); // Re-enabled with better-sqlite3
+      setupProjectsWatcher().then(() => {
+        console.log('👀 File watcher active');
+      }).catch(err => {
+        console.error('❌ Failed to setup projects watcher:', err);
+      });
     });
   } catch (error) {
-    // console.error('❌ Failed to start server:', error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 }

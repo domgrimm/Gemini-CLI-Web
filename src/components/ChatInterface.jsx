@@ -26,6 +26,8 @@ import GeminiStatus from './GeminiStatus';
 import { MicButton } from './MicButton.jsx';
 import { api } from '../utils/api';
 import { playNotificationSound } from '../utils/notificationSound';
+import { Plus, ArrowUp, X } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 // Memoized message component to prevent unnecessary re-renders
 const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFileOpen, onShowSettings, autoExpandTools, showRawParameters }) => {
@@ -1037,17 +1039,25 @@ const ImageAttachment = ({ file, onRemove, uploadProgress, error }) => {
 // - onReplaceTemporarySession: Called to replace temporary session ID with real WebSocket session ID
 //
 // This ensures uninterrupted chat experience by pausing sidebar refreshes during conversations.
-function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, messages, onFileOpen, onInputFocusChange, onSessionActive, onSessionInactive, onReplaceTemporarySession, onNavigateToSession, onShowSettings, autoExpandTools, showRawParameters, autoScrollToBottom }) {
+function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, messages, onFileOpen, onInputFocusChange, onSessionActive, onSessionInactive, onReplaceTemporarySession, onNavigateToSession, onShowSettings }) {
   const [input, setInput] = useState(() => {
-    if (typeof window !== 'undefined' && selectedProject) {
-      return localStorage.getItem(`draft_input_${selectedProject.name}`) || '';
+    try {
+      if (typeof window !== 'undefined' && selectedProject) {
+        return localStorage.getItem(`draft_input_${selectedProject.name}`) || '';
+      }
+    } catch {
+      return '';
     }
     return '';
   });
   const [chatMessages, setChatMessages] = useState(() => {
-    if (typeof window !== 'undefined' && selectedProject) {
-      const saved = localStorage.getItem(`chat_messages_${selectedProject.name}`);
-      return saved ? JSON.parse(saved) : [];
+    try {
+      if (typeof window !== 'undefined' && selectedProject) {
+        const saved = localStorage.getItem(`chat_messages_${selectedProject.name}`);
+        return saved ? JSON.parse(saved) : [];
+      }
+    } catch {
+      return [];
     }
     return [];
   });
@@ -1066,9 +1076,35 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   const [selectedModel, setSelectedModel] = useState(() => {
     try {
       const settings = JSON.parse(localStorage.getItem('gemini-tools-settings') || '{}');
-      return settings.selectedModel || 'gemini-2.5-flash';
+      return settings.selectedModel || 'auto-gemini-3';
     } catch  {
-      return 'gemini-2.5-flash';
+      return 'auto-gemini-3';
+    }
+  });
+  
+  // Integrated settings state
+  const [autoExpandTools, setAutoExpandTools] = useState(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('gemini-tools-settings') || '{}');
+      return settings.autoExpandTools !== undefined ? settings.autoExpandTools : false;
+    } catch {
+      return false;
+    }
+  });
+  const [showRawParameters, setShowRawParameters] = useState(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('gemini-tools-settings') || '{}');
+      return settings.showRawParameters !== undefined ? settings.showRawParameters : false;
+    } catch {
+      return false;
+    }
+  });
+  const [autoScrollToBottom, setAutoScrollToBottom] = useState(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('gemini-tools-settings') || '{}');
+      return settings.autoScrollToBottom !== undefined ? settings.autoScrollToBottom : true;
+    } catch {
+      return true;
     }
   });
   const [isLoadingSessionMessages, setIsLoadingSessionMessages] = useState(false);
@@ -1408,12 +1444,19 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   useEffect(() => {
     const checkSettings = () => {
       try {
-        const settings = JSON.parse(localStorage.getItem('gemini-tools-settings') || '{}');
+        const savedSettings = localStorage.getItem('gemini-tools-settings');
+        const settings = savedSettings ? JSON.parse(savedSettings) : {};
         setIsYoloMode(settings.skipPermissions || false);
-        setSelectedModel(settings.selectedModel || 'gemini-2.5-flash');
+        setSelectedModel(settings.selectedModel || 'auto-gemini-3');
+        setAutoExpandTools(settings.autoExpandTools !== undefined ? settings.autoExpandTools : false);
+        setShowRawParameters(settings.showRawParameters !== undefined ? settings.showRawParameters : false);
+        setAutoScrollToBottom(settings.autoScrollToBottom !== undefined ? settings.autoScrollToBottom : true);
       } catch {
         setIsYoloMode(false);
-        setSelectedModel('gemini-2.5-flash');
+        setSelectedModel('auto-gemini-3');
+        setAutoExpandTools(false);
+        setShowRawParameters(false);
+        setAutoScrollToBottom(true);
       }
     };
     // Check on mount and when storage changes
@@ -1421,13 +1464,6 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     const handleStorageChange = (e) => {
       if (e.key === 'gemini-tools-settings') {
         checkSettings();
-        // Add a system message to notify settings have been applied
-        setChatMessages(prev => [...prev, {
-          id: `system-${Date.now()}`,
-          type: 'system',
-          content: '⚙️ 設定が更新されました。',
-          timestamp: new Date().toISOString()
-        }]);
       }
     };
 
@@ -1464,108 +1500,80 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           break;
 
         case 'gemini-response':
-          { const messageData = latestMessage.data.message || latestMessage.data;
-          // Handle Gemini CLI session duplication bug workaround:
-          // When resuming a session, Gemini CLI creates a new session instead of resuming.
-          // We detect this by checking for system/init messages with session_id that differs
-          // from our current session. When found, we need to switch the user to the new session.
-          if (latestMessage.data.type === 'system' &&
-              latestMessage.data.subtype === 'init' &&
-              latestMessage.data.session_id &&
-              currentSessionId &&
-              latestMessage.data.session_id !== currentSessionId) {
-            // Debug - Gemini CLI session duplication detected
-            // Mark this as a system-initiated session change to preserve messages
-            setIsSystemSessionChange(true);
-            // Switch to the new session using React Router navigation
-            // This triggers the session loading logic in App.jsx without a page reload
-            if (onNavigateToSession) {
-              onNavigateToSession(latestMessage.data.session_id);
-            }
-            return; // Don't process the message further, let the navigation handle it
-          }
-
-          // Handle system/init for new sessions (when currentSessionId is null)
-          if (latestMessage.data.type === 'system' &&
-              latestMessage.data.subtype === 'init' &&
-              latestMessage.data.session_id &&
-              !currentSessionId) {
-
-            // Debug - New session init detected
-
-            // Mark this as a system-initiated session change to preserve messages
-            setIsSystemSessionChange(true);
-
-            // Switch to the new session
-            if (onNavigateToSession) {
-              onNavigateToSession(latestMessage.data.session_id);
-            }
-            return; // Don't process the message further, let the navigation handle it
-          }
-
-          // For system/init messages that match current session, just ignore them
-          if (latestMessage.data.type === 'system' &&
-              latestMessage.data.subtype === 'init' &&
-              latestMessage.data.session_id &&
-              currentSessionId &&
-              latestMessage.data.session_id === currentSessionId) {
-            // Debug - System init message for current session, ignoring
-            return; // Don't process the message further
-          }
-
-          // Handle different types of content in the response
-          if (Array.isArray(messageData.content)) {
-            for (const part of messageData.content) {
-              if (part.type === 'tool_use') {
-                // Add tool use message
-                const toolInput = part.input ? JSON.stringify(part.input, null, 2) : '';
-                setChatMessages(prev => [...prev, {
-                  type: 'assistant',
-                  content: '',
-                  timestamp: new Date(),
-                  isToolUse: true,
-                  toolName: part.name,
-                  toolInput: toolInput,
-                  toolId: part.id,
-                  toolResult: null // Will be updated when result comes in
-                }]);
-              } else if (part.type === 'text' && part.text?.trim()) {
-                // Add regular text message
-                setChatMessages(prev => [...prev, {
-                  type: 'assistant',
-                  content: part.text,
-                  timestamp: new Date()
-                }]);
+          { const eventData = latestMessage.data;
+          if (!eventData) return;
+          
+          // Handle init message
+          if (eventData.type === 'system' && eventData.subtype === 'init') {
+            if (eventData.session_id && currentSessionId && eventData.session_id !== currentSessionId) {
+              setIsSystemSessionChange(true);
+              if (onNavigateToSession) {
+                onNavigateToSession(eventData.session_id);
+              }
+            } else if (eventData.session_id && !currentSessionId) {
+              setIsSystemSessionChange(true);
+              if (onNavigateToSession) {
+                onNavigateToSession(eventData.session_id);
               }
             }
-          } else if (typeof messageData.content === 'string' && messageData.content.trim()) {
-            // Add regular text message
+            return;
+          }
+
+          // Handle assistant message (with delta support)
+          if (eventData.type === 'message' && eventData.role === 'assistant') {
+            setChatMessages(prev => {
+              if (eventData.delta && prev.length > 0) {
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg.type === 'assistant' && !lastMsg.isToolUse) {
+                  // Update last message content
+                  return [
+                    ...prev.slice(0, -1),
+                    {
+                      ...lastMsg,
+                      content: lastMsg.content + eventData.content,
+                      timestamp: new Date()
+                    }
+                  ];
+                }
+              }
+              // New message
+              return [...prev, {
+                type: 'assistant',
+                content: eventData.content,
+                timestamp: new Date()
+              }];
+            });
+          }
+
+          // Handle tool use
+          if (eventData.type === 'tool_use') {
             setChatMessages(prev => [...prev, {
               type: 'assistant',
-              content: messageData.content,
-              timestamp: new Date()
+              content: '',
+              timestamp: new Date(),
+              isToolUse: true,
+              toolName: eventData.name,
+              toolInput: typeof eventData.input === 'string' ? eventData.input : JSON.stringify(eventData.input, null, 2),
+              toolId: eventData.id,
+              toolResult: null
             }]);
           }
-          // Handle tool results from user messages (these come separately)
-          if (messageData.role === 'user' && Array.isArray(messageData.content)) {
-            for (const part of messageData.content) {
-              if (part.type === 'tool_result') {
-                // Find the corresponding tool use and update it with the result
-                setChatMessages(prev => prev.map(msg => {
-                  if (msg.isToolUse && msg.toolId === part.tool_use_id) {
-                    return {
-                      ...msg,
-                      toolResult: {
-                        content: part.content,
-                        isError: part.is_error,
-                        timestamp: new Date()
-                      }
-                    };
+
+          // Handle tool result
+          if (eventData.type === 'tool_result') {
+            setChatMessages(prev => prev.map(msg => {
+              if (msg.isToolUse && msg.toolId === eventData.tool_use_id) {
+                return {
+                  ...msg,
+                  toolResult: {
+                    content: eventData.content,
+                    isError: eventData.is_error,
+                    timestamp: new Date()
                   }
-                  return msg;
-                }));
+                };
               }
-            }
+              return msg;
+            }));
           }
           break; }
         case 'gemini-output':
@@ -2003,7 +2011,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             allowedTools: settings.allowedTools || [],
             disallowedTools: settings.disallowedTools || [],
             skipPermissions: settings.skipPermissions || false,
-            selectedModel: settings.selectedModel || 'gemini-2.5-flash'
+            selectedModel: settings.selectedModel || 'auto-gemini-3'
           };
         }
       } catch {
@@ -2013,7 +2021,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         allowedTools: [],
         disallowedTools: [],
         skipPermissions: false,
-        selectedModel: 'gemini-2.5-flash'
+        selectedModel: 'auto-gemini-3'
       };
     };
 
@@ -2030,7 +2038,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         resume: !!currentSessionId,
         toolsSettings: toolsSettings,
         permissionMode: permissionMode,
-        model: toolsSettings.selectedModel || 'gemini-2.5-flash',
+        model: toolsSettings.selectedModel,
         images: uploadedImages // Pass images to backend
       }
     });
@@ -2302,7 +2310,21 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full animate-pulse ${isYoloMode ? 'bg-orange-500' : 'bg-cyan-500'}`} />
                 <span>{isYoloMode ? 'Gemini YOLO' : 'Gemini Default'}</span>
-                <span className="text-xs opacity-75">• {selectedModel}</span>
+                <span className="text-xs opacity-75">• {
+                  (() => {
+                    const labels = {
+                      'gemini-3.1-pro-preview': 'Gemini 3.1 Pro',
+                      'gemini-3-flash-preview': 'Gemini 3 Flash',
+                      'gemini-3.1-flash-lite-preview': 'Gemini 3.1 Flash-Lite',
+                      'gemini-2.5-pro': 'Gemini 2.5 Pro',
+                      'gemini-2.5-flash': 'Gemini 2.5 Flash',
+                      'gemini-2.5-flash-lite': 'Gemini 2.5 Flash-Lite',
+                      'auto-gemini-3': 'Gemini 3 Auto',
+                      'auto-gemini-2.5': 'Gemini 2.5 Auto'
+                    };
+                    return labels[selectedModel] || selectedModel;
+                  })()
+                }</span>
               </div>
             </div>
 
@@ -2321,23 +2343,21 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto">
+        <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto px-2 sm:px-0">
           {/* Drag overlay */}
           {isDragActive && (
-            <div className="absolute inset-0 bg-gemini-700/20 border-2 border-dashed border-gemini-300 rounded-lg flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-zinc-800 rounded-lg p-4 shadow-lg">
-                <svg className="w-8 h-8 text-gemini-600 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <p className="text-sm font-medium">Drop images here</p>
+            <div className="absolute inset-0 bg-gemini-700/20 border-2 border-dashed border-gemini-300 rounded-3xl flex items-center justify-center z-50 backdrop-blur-sm">
+              <div className="bg-white dark:bg-zinc-800 rounded-2xl p-6 shadow-xl text-center">
+                <Plus className="w-10 h-10 text-gemini-600 mx-auto mb-2 animate-bounce" />
+                <p className="text-sm font-semibold">Drop images here</p>
               </div>
             </div>
           )}
 
           {/* Image attachments preview */}
           {attachedImages.length > 0 && (
-            <div className="mb-2 p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
-              <div className="flex flex-wrap gap-2">
+            <div className="mb-3 p-3 bg-zinc-50/50 dark:bg-zinc-900/50 backdrop-blur-md rounded-2xl border border-zinc-200 dark:border-zinc-800">
+              <div className="flex flex-wrap gap-3">
                 {attachedImages.map((file, index) => (
                   <ImageAttachment
                     key={index}
@@ -2353,163 +2373,130 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             </div>
           )}
 
-          {/* File dropdown - positioned outside dropzone to avoid conflicts */}
+          {/* File dropdown */}
           {showFileDropdown && filteredFiles.length > 0 && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-600 rounded-lg shadow-lg max-h-48 overflow-y-auto z-50 backdrop-blur-sm">
-              {filteredFiles.map((file, index) => (
-                <div
-                  key={file.path}
-                  className={`px-4 py-3 cursor-pointer border-b border-zinc-100 dark:border-zinc-700 last:border-b-0 touch-manipulation ${
-                    index === selectedFileIndex
-                      ? 'bg-gemini-50 dark:bg-gemini-900/20 text-gemini-700 dark:text-gemini-300'
-                      : 'hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300'
-                  }`}
-                  onMouseDown={(e) => {
-                    // Prevent textarea from losing focus on mobile
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    selectFile(file);
-                  }}
-                >
-                  <div className="font-medium text-sm">{file.name}</div>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                    {file.path}
+            <div className="absolute bottom-full left-0 right-0 mb-3 mx-2 sm:mx-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl max-h-64 overflow-hidden z-50 backdrop-blur-xl">
+              <div className="px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                Matching Files
+              </div>
+              <ScrollArea className="max-h-56">
+                {filteredFiles.map((file, index) => (
+                  <div
+                    key={file.path}
+                    className={cn(
+                      "px-4 py-3 cursor-pointer border-b border-zinc-50 dark:border-zinc-800/50 last:border-b-0 transition-colors",
+                      index === selectedFileIndex
+                        ? 'bg-gemini-50 dark:bg-gemini-900/40 text-gemini-700 dark:text-gemini-300'
+                        : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300'
+                    )}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      selectFile(file);
+                    }}
+                  >
+                    <div className="font-medium text-sm">{file.name}</div>
+                    <div className="text-[10px] text-zinc-500 dark:text-zinc-500 font-mono truncate">
+                      {file.path}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </ScrollArea>
             </div>
           )}
 
-          <div {...getRootProps()} className={`chat-input-container relative bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-600 focus-within:ring-2 focus-within:ring-gemini-500 dark:focus-within:ring-gemini-500 focus-within:border-gemini-500 transition-all duration-200 ${isTextareaExpanded ? 'chat-input-expanded' : ''}`}>
+          <div {...getRootProps()} className={cn(
+            "relative flex items-end gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all duration-300",
+            isTextareaExpanded ? "rounded-2xl" : "rounded-[28px]",
+            isInputFocused ? "ring-4 ring-gemini-500/10 border-gemini-500/40" : ""
+          )}>
             <input {...getInputProps()} />
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={handleInputChange}
-              onClick={handleTextareaClick}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              onFocus={() => setIsInputFocused(true)}
-              onBlur={() => setIsInputFocused(false)}
-              onInput={(e) => {
-                // Immediate resize on input for better UX
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-                setCursorPosition(e.target.selectionStart);
-
-                // Check if textarea is expanded (more than 2 lines worth of height)
-                const lineHeight = parseInt(window.getComputedStyle(e.target).lineHeight);
-                const isExpanded = e.target.scrollHeight > lineHeight * 2;
-                setIsTextareaExpanded(isExpanded);
-              }}
-              placeholder="Ask Gemini to help with your code... (@ to reference files)"
-              disabled={isLoading}
-              rows={1}
-              className="chat-input-placeholder w-full pl-12 pr-28 sm:pr-40 py-3 sm:py-4 bg-transparent rounded-2xl focus:outline-none text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-400 disabled:opacity-50 resize-none min-h-[40px] sm:min-h-[56px] max-h-[40vh] sm:max-h-[300px] overflow-y-auto text-sm sm:text-base transition-all duration-200"
-              style={{ height: 'auto' }}
-            />
-            {/* Clear button - shown when there's text */}
-            {input.trim() && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setInput('');
-                  if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.focus();
-                  }
-                  setIsTextareaExpanded(false);
-                }}
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setInput('');
-                  if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.focus();
-                  }
-                  setIsTextareaExpanded(false);
-                }}
-                className="absolute -left-0.5 -top-3 sm:right-28 sm:left-auto sm:top-1/2 sm:-translate-y-1/2 w-6 h-6 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-full flex items-center justify-center transition-all duration-200 group z-10 shadow-sm"
-                title="Clear input"
-              >
-                <svg
-                  className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-300 group-hover:text-gray-800 dark:group-hover:text-gray-100 transition-colors" 
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-            {/* Image upload button */}
+            
+            {/* Attachment Button */}
             <button
               type="button"
               onClick={open}
-              className="absolute left-2 bottom-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              className="mb-1.5 ml-1.5 p-2 text-zinc-500 hover:text-gemini-600 dark:hover:text-gemini-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors flex-shrink-0"
               title="Attach images"
             >
-              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+              <Plus className="w-6 h-6" />
             </button>
 
-            {/* Mic button - HIDDEN */}
-            <div className="absolute right-16 sm:right-16 top-1/2 transform -translate-y-1/2" style={{ display: 'none' }}>
-              <MicButton
-                onTranscript={handleTranscript}
-                className="w-10 h-10 sm:w-10 sm:h-10"
+            <div className="relative flex-1 min-w-0 flex items-center">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={handleInputChange}
+                onClick={handleTextareaClick}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
+                onInput={(e) => {
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                  setCursorPosition(e.target.selectionStart);
+                  const lineHeight = parseInt(window.getComputedStyle(e.target).lineHeight);
+                  const isExpanded = e.target.scrollHeight > lineHeight * 2.5;
+                  setIsTextareaExpanded(isExpanded);
+                }}
+                placeholder="Ask Gemini..."
+                disabled={isLoading}
+                rows={1}
+                className="w-full py-3 bg-transparent focus:outline-none text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 disabled:opacity-50 resize-none min-h-[48px] max-h-[40vh] sm:max-h-[300px] overflow-y-auto text-[16px] leading-relaxed"
+                style={{ height: 'auto' }}
               />
+              
+              {/* Clear button */}
+              {input.trim() && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setInput('');
+                    if (textareaRef.current) {
+                      textareaRef.current.style.height = 'auto';
+                      textareaRef.current.focus();
+                    }
+                    setIsTextareaExpanded(false);
+                  }}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors mr-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
+
             {/* Send button */}
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                handleSubmit(e);
-              }}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                handleSubmit(e);
-              }}
-              className="absolute right-2 top-1/3 transform -translate-y-1/2 w-12 h-12 sm:w-12 sm:h-12 bg-gemini-500 hover:bg-gemini-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-gemini-500 focus:ring-offset-2 dark:ring-offset-gray-800"
+              className={cn(
+                "mb-1.5 mr-1.5 flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 flex-shrink-0",
+                input.trim() && !isLoading
+                  ? "bg-gemini-600 text-white shadow-lg shadow-gemini-500/30 scale-100 rotate-0"
+                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 scale-90 -rotate-45"
+              )}
             >
-              <svg
-                className="w-4 h-4 sm:w-5 sm:h-5 text-white transform rotate-90"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                />
-              </svg>
+              {isLoading ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <ArrowUp className="w-5 h-5" />
+              )}
             </button>
           </div>
+
           {/* Hint text */}
-          <div className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 hidden sm:block">
-            Press Enter to send • Shift+Enter for new line • Tab to change modes • @ to reference files
-          </div>
-          <div className={`text-xs text-gray-500 dark:text-gray-400 text-center mt-2 sm:hidden transition-opacity duration-200 ${
-            isInputFocused ? 'opacity-100' : 'opacity-0'
-          }`}>
-            Enter to send • Tab for modes • @ for files
+          <div className="text-[10px] text-zinc-400 dark:text-zinc-500 text-center mt-2 px-4 space-x-2 flex justify-center items-center">
+            <span className="hidden sm:inline">Press Enter to send</span>
+            <span className="hidden sm:inline opacity-30">•</span>
+            <span className="hidden sm:inline text-zinc-500">Shift+Enter for new line</span>
+            <span className="hidden sm:inline opacity-30">•</span>
+            <span>@ to reference files</span>
           </div>
         </form>
       </div>

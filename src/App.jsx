@@ -24,14 +24,12 @@ import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
 import MobileNav from './components/MobileNav';
 import ToolsSettings from './components/ToolsSettings';
-import QuickSettingsPanel from './components/QuickSettingsPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 
 import { useWebSocket } from './utils/websocket';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import { useVersionCheck } from './hooks/useVersionCheck';
 import { api } from './utils/api';
 
 
@@ -39,9 +37,6 @@ import { api } from './utils/api';
 function AppContent() {
   const navigate = useNavigate();
   const { sessionId } = useParams();
-
-  const { updateAvailable, latestVersion, currentVersion } = useVersionCheck('siteboon', 'claudecodeui');
-  const [showVersionModal, setShowVersionModal] = useState(false);
 
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -52,19 +47,6 @@ function AppContent() {
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showToolsSettings, setShowToolsSettings] = useState(false);
-  const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [autoExpandTools, setAutoExpandTools] = useState(() => {
-    const saved = localStorage.getItem('autoExpandTools');
-    return saved !== null ? JSON.parse(saved) : false;
-  });
-  const [showRawParameters, setShowRawParameters] = useState(() => {
-    const saved = localStorage.getItem('showRawParameters');
-    return saved !== null ? JSON.parse(saved) : false;
-  });
-  const [autoScrollToBottom, setAutoScrollToBottom] = useState(() => {
-    const saved = localStorage.getItem('autoScrollToBottom');
-    return saved !== null ? JSON.parse(saved) : true;
-  });
   // Session Protection System: Track sessions with active conversations to prevent
   // automatic project updates from interrupting ongoing chats. When a user sends
   // a message, the session is marked as "active" and project updates are paused
@@ -128,9 +110,8 @@ function AppContent() {
     // Check if the selected session's content has changed (modification vs addition)
     // Compare key fields that would affect the loaded chat interface
     return currentSelectedSession.id === updatedSelectedSession.id &&
-          currentSelectedSession.title === updatedSelectedSession.title &&
-          currentSelectedSession.created_at === updatedSelectedSession.created_at &&
-          currentSelectedSession.updated_at === updatedSelectedSession.updated_at;
+          (currentSelectedSession.summary === updatedSelectedSession.summary || currentSelectedSession.title === updatedSelectedSession.title) &&
+          currentSelectedSession.lastActivity === updatedSelectedSession.lastActivity;
   };
 
   // Handle WebSocket messages for real-time project updates
@@ -185,6 +166,13 @@ function AppContent() {
       setIsLoadingProjects(true);
       const response = await api.projects();
       const data = await response.json();
+      
+      if (!Array.isArray(data)) {
+        console.error('Projects data is not an array:', data);
+        setIsLoadingProjects(false);
+        return;
+      }
+
       // Optimize to preserve object references when data hasn't changed
       setProjects(prevProjects => {
         // If no previous projects, just set the new data
@@ -394,97 +382,6 @@ function AppContent() {
     }
   };
 
-  // Version Upgrade Modal Component
-  const VersionUpgradeModal = () => {
-    if (!showVersionModal) {
-      return null;
-    }
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
-        {/* Backdrop */}
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-          onClick={() => setShowVersionModal(false)}
-        />
-
-        {/* Modal */}
-        <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-full max-w-md mx-4 p-6 space-y-4">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gemini-100 dark:bg-gemini-900/30 rounded-lg flex items-center justify-center">
-                <svg className="w-5 h-5 text-gemini-600 dark:text-gemini-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Update Available</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">A new version is ready</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowVersionModal(false)}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Version Info */}
-          <div className="space-y-3">
-            <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Current Version</span>
-              <span className="text-sm text-gray-900 dark:text-white font-mono">{currentVersion}</span>
-            </div>
-            <div className="flex justify-between items-center p-3 bg-gemini-50 dark:bg-gemini-900/20 rounded-lg border border-gemini-200 dark:border-gemini-700">
-              <span className="text-sm font-medium text-gemini-700 dark:text-gemini-300">Latest Version</span>
-              <span className="text-sm text-gemini-900 dark:text-gemini-100 font-mono">{latestVersion}</span>
-            </div>
-          </div>
-
-          {/* Upgrade Instructions */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-gray-900 dark:text-white">How to upgrade:</h3>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 border">
-              <code className="text-sm text-gray-800 dark:text-gray-200 font-mono">
-                git checkout main && git pull && npm install
-              </code>
-            </div>
-            <p className="text-xs text-gray-600 dark:text-gray-400">
-              Run this command in your Gemini Code UI directory to update to the latest version.
-            </p>
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={() => setShowVersionModal(false)}
-              className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
-            >
-              Later
-            </button>
-            <button
-              onClick={() => {
-                // Copy command to clipboard
-                navigator.clipboard.writeText('git checkout main && git pull && npm install')
-                  .catch(() => {
-                    // Silently fail if clipboard access is denied
-                  });
-                setShowVersionModal(false);
-              }}
-              className="flex-1 px-4 py-2 text-sm font-medium text-white bg-gemini-500 hover:bg-gemini-600 rounded-md transition-colors"
-            >
-              Copy Command
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="fixed inset-0 flex bg-zinc-700 text-white">
       {/* Fixed Desktop Sidebar */}
@@ -503,10 +400,6 @@ function AppContent() {
               isLoading={isLoadingProjects}
               onRefresh={handleSidebarRefresh}
               onShowSettings={() => setShowToolsSettings(true)}
-              updateAvailable={updateAvailable}
-              latestVersion={latestVersion}
-              currentVersion={currentVersion}
-              onShowVersionModal={() => setShowVersionModal(true)}
             />
           </div>
         </div>
@@ -548,10 +441,6 @@ function AppContent() {
               isLoading={isLoadingProjects}
               onRefresh={handleSidebarRefresh}
               onShowSettings={() => setShowToolsSettings(true)}
-              updateAvailable={updateAvailable}
-              latestVersion={latestVersion}
-              currentVersion={currentVersion}
-              onShowVersionModal={() => setShowVersionModal(true)}
             />
           </div>
         </div>
@@ -576,9 +465,6 @@ function AppContent() {
           onReplaceTemporarySession={replaceTemporarySession}
           onNavigateToSession={(sessionId) => navigate(`/session/${sessionId}`)}
           onShowSettings={() => setShowToolsSettings(true)}
-          autoExpandTools={autoExpandTools}
-          showRawParameters={showRawParameters}
-          autoScrollToBottom={autoScrollToBottom}
         />
       </div>
 
@@ -590,38 +476,10 @@ function AppContent() {
           isInputFocused={isInputFocused}
         />
       )}
-      {/* Quick Settings Panel - Only show on chat tab */}
-      {activeTab === 'chat' && (
-        <QuickSettingsPanel
-          isOpen={showQuickSettings}
-          onToggle={setShowQuickSettings}
-          autoExpandTools={autoExpandTools}
-          onAutoExpandChange={(value) => {
-            setAutoExpandTools(value);
-            localStorage.setItem('autoExpandTools', JSON.stringify(value));
-          }}
-          showRawParameters={showRawParameters}
-          onShowRawParametersChange={(value) => {
-            setShowRawParameters(value);
-            localStorage.setItem('showRawParameters', JSON.stringify(value));
-          }}
-          autoScrollToBottom={autoScrollToBottom}
-          onAutoScrollChange={(value) => {
-            setAutoScrollToBottom(value);
-            localStorage.setItem('autoScrollToBottom', JSON.stringify(value));
-          }}
-          isMobile={isMobile}
-        />
-      )}
-
-      {/* Tools Settings Modal */}
       <ToolsSettings
         isOpen={showToolsSettings}
         onClose={() => setShowToolsSettings(false)}
       />
-
-      {/* Version Upgrade Modal */}
-      <VersionUpgradeModal />
     </div>
   );
 }

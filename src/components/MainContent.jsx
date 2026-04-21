@@ -38,10 +38,7 @@ function MainContent({
   onSessionInactive,      // Mark session as inactive when conversation completes/aborts
   onReplaceTemporarySession, // Replace temporary session ID with real session ID from WebSocket
   onNavigateToSession,    // Navigate to a specific session (for Gemini CLI session duplication workaround)
-  onShowSettings,         // Show tools settings panel
-  autoExpandTools,        // Auto-expand tool accordions
-  showRawParameters,      // Show raw parameters in tool accordions
-  autoScrollToBottom      // Auto-scroll to bottom when new messages arrive
+  onShowSettings         // Show tools settings panel
 }) {
   const [editingFile, setEditingFile] = useState(null);
 
@@ -314,11 +311,7 @@ function MainContent({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
-            showRawParameters={showRawParameters}
-            autoScrollToBottom={autoScrollToBottom}
-          />
-        </div>
+            />        </div>
         <div className={`h-full overflow-hidden ${activeTab === 'files' ? 'block' : 'hidden'}`}>
           <FileTree selectedProject={selectedProject} />
         </div>
@@ -343,11 +336,7 @@ function MainContent({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
-            showRawParameters={showRawParameters}
-            autoScrollToBottom={autoScrollToBottom}
-          />
-        </div>
+            />        </div>
         <div className={`h-full overflow-hidden ${activeTab === 'spec' ? 'block' : 'hidden'}`}>
           <SpecDesign selectedProject={selectedProject} />
         </div>

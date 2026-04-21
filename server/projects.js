@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import path from 'path';
 import readline from 'readline';
+import os from 'os';
 
 // Cache for extracted project directories
 const projectDirectoryCache = new Map();
@@ -61,253 +62,148 @@ async function generateDisplayName(projectName, actualProjectDir = null) {
   return projectPath;
 }
 
-// Extract the actual project directory from JSONL sessions (with caching)
+// Extract the actual project directory from projects.json mapping
 async function extractProjectDirectory(projectName) {
+  // Normalize project name for consistent lookup
+  const searchName = projectName.trim();
+  
   // Check cache first
-  if (projectDirectoryCache.has(projectName)) {
-    return projectDirectoryCache.get(projectName);
+  if (projectDirectoryCache.has(searchName)) {
+    return projectDirectoryCache.get(searchName);
   }
-  const projectDir = path.join(process.env.HOME, '.gemini', 'projects', projectName);
-  const cwdCounts = new Map();
-  let latestTimestamp = 0;
-  let latestCwd = null;
-  let extractedPath;
+
+  const projectsConfigPath = path.join(os.homedir(), '.gemini', 'projects.json');
+  
   try {
-    const files = await fs.readdir(projectDir);
-    const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
-    if (jsonlFiles.length === 0) {
-      // Fall back to decoded project name if no sessions
-      // First try to decode from base64
-      try {
-        // Handle custom padding: __ at the end should be replaced with ==
-        let base64Name = projectName.replace(/_/g, '+').replace(/-/g, '/');
-        if (base64Name.endsWith('++')) {
-          base64Name = base64Name.slice(0, -2) + '==';
-        }
-        extractedPath = Buffer.from(base64Name, 'base64').toString('utf8');
-        // Clean the path by removing any non-printable characters
-        extractedPath = extractedPath.replace(/[^\x20-\x7E]/g, '').trim();
-      } catch (e) {
-        // If base64 decode fails, use old method
-        extractedPath = projectName.replace(/-/g, '/');
-      }
-    } else {
-      // Process all JSONL files to collect cwd values
-      for (const file of jsonlFiles) {
-        const jsonlFile = path.join(projectDir, file);
-        const fileStream = fsSync.createReadStream(jsonlFile);
-        const rl = readline.createInterface({
-          input: fileStream,
-          crlfDelay: Infinity
-        });
-        for await (const line of rl) {
-          if (line.trim()) {
-            try {
-              const entry = JSON.parse(line);
-              if (entry.cwd) {
-                // Count occurrences of each cwd
-                cwdCounts.set(entry.cwd, (cwdCounts.get(entry.cwd) || 0) + 1);
-                // Track the most recent cwd
-                const timestamp = new Date(entry.timestamp || 0).getTime();
-                if (timestamp > latestTimestamp) {
-                  latestTimestamp = timestamp;
-                  latestCwd = entry.cwd;
-                }
-              }
-            } catch (parseError) {
-              // Skip malformed lines
-            }
-          }
-        }
-      }
-      // Determine the best cwd to use
-      if (cwdCounts.size === 0) {
-        // No cwd found, fall back to decoded project name
-        extractedPath = projectName.replace(/-/g, '/');
-      } else if (cwdCounts.size === 1) {
-        // Only one cwd, use it
-        extractedPath = Array.from(cwdCounts.keys())[0];
-      } else {
-        // Multiple cwd values - prefer the most recent one if it has reasonable usage
-        const mostRecentCount = cwdCounts.get(latestCwd) || 0;
-        const maxCount = Math.max(...cwdCounts.values());
-        // Use most recent if it has at least 25% of the max count
-        if (mostRecentCount >= maxCount * 0.25) {
-          extractedPath = latestCwd;
-        } else {
-          // Otherwise use the most frequently used cwd
-          for (const [cwd, count] of cwdCounts.entries()) {
-            if (count === maxCount) {
-              extractedPath = cwd;
-              break;
-            }
-          }
-        }
-        // Fallback (shouldn't reach here)
-        if (!extractedPath) {
-          try {
-            extractedPath = latestCwd || Buffer.from(projectName.replace(/_/g, '+').replace(/-/g, '/'), 'base64').toString('utf8');
-          } catch (e) {
-            extractedPath = latestCwd || projectName.replace(/-/g, '/');
+    if (fsSync.existsSync(projectsConfigPath)) {
+      const configData = fsSync.readFileSync(projectsConfigPath, 'utf8');
+      const config = JSON.parse(configData);
+      
+      if (config.projects) {
+        // Find the entry that matches the projectName (value)
+        for (const [dir, name] of Object.entries(config.projects)) {
+          if (name === searchName) {
+            // Normalize path (handle tilde, resolve to absolute)
+            let absolutePath = dir.replace(/^~/, os.homedir());
+            absolutePath = path.resolve(absolutePath);
+            
+            projectDirectoryCache.set(searchName, absolutePath);
+            return absolutePath;
           }
         }
       }
     }
-    // Clean the extracted path by removing any non-printable characters
-    extractedPath = extractedPath.replace(/[^\x20-\x7E]/g, '').trim();
-    // Cache the result
-    projectDirectoryCache.set(projectName, extractedPath);
-    return extractedPath;
   } catch (error) {
-    // console.error(`Error extracting project directory for ${projectName}:`, error);
-    // Fall back to decoded project name
-    try {
-      // Handle custom padding: __ at the end should be replaced with ==
-      let base64Name = projectName.replace(/_/g, '+').replace(/-/g, '/');
-      if (base64Name.endsWith('++')) {
-        base64Name = base64Name.slice(0, -2) + '==';
-      }
-      extractedPath = Buffer.from(base64Name, 'base64').toString('utf8');
-      // Clean the path by removing any non-printable characters
-      extractedPath = extractedPath.replace(/[^\x20-\x7E]/g, '').trim();
-    } catch (e) {
-      extractedPath = projectName.replace(/-/g, '/');
-    }
-    // Cache the fallback result too
-    projectDirectoryCache.set(projectName, extractedPath);
-    return extractedPath;
+    // console.error('Error reading projects.json in extractProjectDirectory:', error);
   }
+
+  // Fallback: If not found, it might be an absolute path passed directly or old format
+  // If it starts with / or ~, it's likely a path, not a name
+  if (searchName.startsWith('/') || searchName.startsWith('~')) {
+    let fallbackPath = searchName.replace(/^~/, os.homedir());
+    fallbackPath = path.resolve(fallbackPath);
+    return fallbackPath;
+  }
+
+  // Last resort fallback
+  const dashFallback = path.resolve(searchName.replace(/-/g, '/'));
+  return dashFallback;
 }
 
 async function getProjects() {
-  const geminiDir = path.join(process.env.HOME, '.gemini', 'projects');
-  const config = await loadProjectConfig();
+  const projectsConfigPath = path.join(os.homedir(), '.gemini', 'projects.json');
   const projects = [];
-  const existingProjects = new Set();
+
   try {
-    // First, get existing projects from the file system
-    const entries = await fs.readdir(geminiDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        existingProjects.add(entry.name);
-        const projectPath = path.join(geminiDir, entry.name);
-        // Extract actual project directory from JSONL sessions
-        const actualProjectDir = await extractProjectDirectory(entry.name);
-        // Get display name from config or generate one
-        const customName = config[entry.name]?.displayName;
-        const autoDisplayName = await generateDisplayName(entry.name, actualProjectDir);
-        const fullPath = actualProjectDir;
-        const project = {
-          name: entry.name,
-          path: actualProjectDir,
-          displayName: customName || autoDisplayName,
-          fullPath: fullPath,
-          isCustomName: !!customName,
-          sessions: []
-        };
-        // Try to get sessions for this project (just first 5 for performance)
-        try {
-          // Use sessionManager to get sessions for this project
-          const sessionManager = (await import('./sessionManager.js')).default;
-          const allSessions = sessionManager.getProjectSessions(actualProjectDir);
-          // Paginate the sessions
-          const paginatedSessions = allSessions.slice(0, 5);
-          project.sessions = paginatedSessions;
-          project.sessionMeta = {
-            hasMore: allSessions.length > 5,
-            total: allSessions.length
-          };
-        } catch (e) {
-          // console.warn(`Could not load sessions for project ${entry.name}:`, e.message);
+    if (fsSync.existsSync(projectsConfigPath)) {
+      const configData = fsSync.readFileSync(projectsConfigPath, 'utf8');
+      const config = JSON.parse(configData);
+      
+      if (config.projects) {
+        for (const [dir, name] of Object.entries(config.projects)) {
+          // Normalize directory path
+          const absolutePath = path.resolve(dir.replace('~', os.homedir()));
+          
+          projects.push({
+            id: name,
+            name: name,
+            path: absolutePath,
+            displayName: name,
+            fullPath: absolutePath,
+            sessions: [], // Initialize with empty array
+            sessionMeta: { total: 0, hasMore: false }
+          });
         }
-        projects.push(project);
       }
+    }
+    
+    // Fallback: If no projects in projects.json, try to check current directory
+    if (projects.length === 0) {
+      const cwd = process.cwd();
+      projects.push({
+        id: path.basename(cwd),
+        name: path.basename(cwd),
+        path: cwd,
+        displayName: path.basename(cwd),
+        fullPath: cwd
+      });
     }
   } catch (error) {
-    // console.error('Error reading projects directory:', error);
+    // console.error('Error reading projects.json:', error);
   }
-  // Add manually configured projects that don't exist as folders yet
-  for (const [projectName, projectConfig] of Object.entries(config)) {
-    if (!existingProjects.has(projectName) && projectConfig.manuallyAdded) {
-      // Use the original path if available, otherwise extract from potential sessions
-      let actualProjectDir = projectConfig.originalPath;
-      if (!actualProjectDir) {
-        try {
-          actualProjectDir = await extractProjectDirectory(projectName);
-        } catch (error) {
-          // Fall back to decoded project name
-          actualProjectDir = projectName.replace(/-/g, '/');
-        }
-      }
-              const project = {
-          name: projectName,
-          path: actualProjectDir,
-          displayName: projectConfig.displayName || await generateDisplayName(projectName, actualProjectDir),
-          fullPath: actualProjectDir,
-          isCustomName: !!projectConfig.displayName,
-          isManuallyAdded: true,
-          sessions: []
-        };
-      projects.push(project);
-    }
-  }
+
   return projects;
 }
 
 async function getSessions(projectName, limit = 5, offset = 0) {
-  const projectDir = path.join(process.env.HOME, '.gemini', 'projects', projectName);
-  try {
-    const files = await fs.readdir(projectDir);
-    const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
-    if (jsonlFiles.length === 0) {
-      return { sessions: [], hasMore: false, total: 0 };
-    }
-    // For performance, get file stats to sort by modification time
-    const filesWithStats = await Promise.all(
-      jsonlFiles.map(async (file) => {
-        const filePath = path.join(projectDir, file);
-        const stats = await fs.stat(filePath);
-        return { file, mtime: stats.mtime };
-      })
-    );
-    // Sort files by modification time (newest first) for better performance
-    filesWithStats.sort((a, b) => b.mtime - a.mtime);
-    const allSessions = new Map();
-    let processedCount = 0;
-    // Process files in order of modification time
-    for (const { file } of filesWithStats) {
-      const jsonlFile = path.join(projectDir, file);
-      const sessions = await parseJsonlSessions(jsonlFile);
-      // Merge sessions, avoiding duplicates by session ID
-      sessions.forEach(session => {
-        if (!allSessions.has(session.id)) {
-          allSessions.set(session.id, session);
+  const projects = await getProjects();
+  const project = projects.find(p => p.name === projectName);
+  if (!project) return { sessions: [], hasMore: false, total: 0 };
+
+  return new Promise((resolve) => {
+    const geminiPath = process.env.GEMINI_PATH || 'gemini';
+    const child = spawn(geminiPath, ['--list-sessions'], {
+      cwd: project.path,
+      env: { ...process.env }
+    });
+
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    child.on('close', () => {
+      const sessions = [];
+      const lines = output.split('\n');
+      
+      // Parse output like: "  1. summary (time) [UUID]"
+      const sessionRegex = /^\s*(\d+)\.\s+(.+)\s+\((.+)\)\s+\[(.+)\]$/;
+      
+      for (const line of lines) {
+        const match = line.match(sessionRegex);
+        if (match) {
+          sessions.push({
+            id: match[4],
+            summary: match[2],
+            lastActivity: match[3],
+            projectName: projectName
+          });
         }
-      });
-      processedCount++;
-      // Early exit optimization: if we have enough sessions and processed recent files
-      if (allSessions.size >= (limit + offset) * 2 && processedCount >= Math.min(3, filesWithStats.length)) {
-        break;
       }
-    }
-    // Convert to array and sort by last activity
-    const sortedSessions = Array.from(allSessions.values()).sort((a, b) =>
-      new Date(b.lastActivity) - new Date(a.lastActivity)
-    );
-    const total = sortedSessions.length;
-    const paginatedSessions = sortedSessions.slice(offset, offset + limit);
-    const hasMore = offset + limit < total;
-    return {
-      sessions: paginatedSessions,
-      hasMore,
-      total,
-      offset,
-      limit
-    };
-  } catch (error) {
-    // console.error(`Error reading sessions for project ${projectName}:`, error);
-    return { sessions: [], hasMore: false, total: 0 };
-  }
+      
+      const total = sessions.length;
+      const paginatedSessions = sessions.slice(offset, offset + limit);
+      const hasMore = offset + limit < total;
+      
+      resolve({
+        sessions: paginatedSessions,
+        hasMore,
+        total,
+        offset,
+        limit
+      });
+    });
+  });
 }
 
 async function parseJsonlSessions(filePath) {
@@ -427,75 +323,88 @@ async function renameProject(projectName, newDisplayName) {
 
 // Delete a session from a project
 async function deleteSession(projectName, sessionId) {
-  const projectDir = path.join(process.env.HOME, '.gemini', 'projects', projectName);
-  try {
-    const files = await fs.readdir(projectDir);
-    const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
-    if (jsonlFiles.length === 0) {
-      throw new Error('No session files found for this project');
-    }
-    // Check all JSONL files to find which one contains the session
-    for (const file of jsonlFiles) {
-      const jsonlFile = path.join(projectDir, file);
-      const content = await fs.readFile(jsonlFile, 'utf8');
-      const lines = content.split('\n').filter(line => line.trim());
-      // Check if this file contains the session
-      const hasSession = lines.some(line => {
-        try {
-          const data = JSON.parse(line);
-          return data.sessionId === sessionId;
-        } catch {
-          return false;
+  const projects = await getProjects();
+  const project = projects.find(p => p.name === projectName);
+  if (!project) throw new Error(`Project ${projectName} not found`);
+
+  return new Promise((resolve, reject) => {
+    const geminiPath = process.env.GEMINI_PATH || 'gemini';
+    
+    // First, list sessions to find the index for the given UUID
+    const listChild = spawn(geminiPath, ['--list-sessions'], {
+      cwd: project.path,
+      env: { ...process.env }
+    });
+
+    let output = '';
+    listChild.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    listChild.on('close', (code) => {
+      const lines = output.split('\n');
+      const sessionRegex = /^\s*(\d+)\.\s+.+\[(.+)\]$/;
+      let indexToDelete = null;
+
+      for (const line of lines) {
+        const match = line.match(sessionRegex);
+        if (match && match[2] === sessionId) {
+          indexToDelete = match[1];
+          break;
+        }
+      }
+
+      if (!indexToDelete) {
+        return reject(new Error(`Session ${sessionId} not found in project ${projectName}`));
+      }
+
+      // Now delete by index
+      const deleteChild = spawn(geminiPath, ['--delete-session', indexToDelete], {
+        cwd: project.path,
+        env: { ...process.env }
+      });
+
+      deleteChild.on('close', (deleteCode) => {
+        if (deleteCode === 0) {
+          resolve(true);
+        } else {
+          reject(new Error(`Gemini CLI failed to delete session with code ${deleteCode}`));
         }
       });
-      if (hasSession) {
-        // Filter out all entries for this session
-        const filteredLines = lines.filter(line => {
-          try {
-            const data = JSON.parse(line);
-            return data.sessionId !== sessionId;
-          } catch {
-            return true; // Keep malformed lines
-          }
-        });
-        // Write back the filtered content
-        await fs.writeFile(jsonlFile, filteredLines.join('\n') + (filteredLines.length > 0 ? '\n' : ''));
-        return true;
+    });
+  });
+}
+
+// Delete a project mapping
+async function deleteProject(projectName) {
+  const projectsConfigPath = path.join(os.homedir(), '.gemini', 'projects.json');
+  
+  try {
+    if (!fsSync.existsSync(projectsConfigPath)) {
+      return true;
+    }
+
+    const configData = fsSync.readFileSync(projectsConfigPath, 'utf8');
+    const config = JSON.parse(configData);
+    
+    if (!config.projects) {
+      return true;
+    }
+
+    // Find and remove the project by name
+    let found = false;
+    for (const [dir, name] of Object.entries(config.projects)) {
+      if (name === projectName) {
+        delete config.projects[dir];
+        found = true;
+        break;
       }
     }
-    throw new Error(`Session ${sessionId} not found in any files`);
-  } catch (error) {
-    // console.error(`Error deleting session ${sessionId} from project ${projectName}:`, error);
-    throw error;
-  }
-}
 
-// Check if a project is empty (has no sessions)
-async function isProjectEmpty(projectName) {
-  try {
-    const sessionsResult = await getSessions(projectName, 1, 0);
-    return sessionsResult.total === 0;
-  } catch (error) {
-    // console.error(`Error checking if project ${projectName} is empty:`, error);
-    return false;
-  }
-}
-
-// Delete an empty project
-async function deleteProject(projectName) {
-  const projectDir = path.join(process.env.HOME, '.gemini', 'projects', projectName);
-  try {
-    // First check if the project is empty
-    const isEmpty = await isProjectEmpty(projectName);
-    if (!isEmpty) {
-      throw new Error('Cannot delete project with existing sessions');
+    if (found) {
+      await fs.writeFile(projectsConfigPath, JSON.stringify(config, null, 2), 'utf8');
     }
-    // Remove the project directory
-    await fs.rm(projectDir, { recursive: true, force: true });
-    // Remove from project config
-    const config = await loadProjectConfig();
-    delete config[projectName];
-    await saveProjectConfig(config);
+    
     return true;
   } catch (error) {
     // console.error(`Error deleting project ${projectName}:`, error);
@@ -503,55 +412,80 @@ async function deleteProject(projectName) {
   }
 }
 
-// Add a project manually to the config (without creating folders)
+// Add a project manually to the config
 async function addProjectManually(projectPath, displayName = null) {
-  const absolutePath = path.resolve(projectPath);
+  const absolutePath = path.resolve(projectPath.replace('~', os.homedir()));
+  const projectsConfigPath = path.join(os.homedir(), '.gemini', 'projects.json');
+  
   try {
     // Check if the path exists
     await fs.access(absolutePath);
-  } catch (error) {
-    throw new Error(`Path does not exist: ${absolutePath}`);
-  }
-  // Generate project name (encode path for use as directory name)
-  // Use base64 encoding to handle all path characters safely
-  const projectName = Buffer.from(absolutePath).toString('base64').replace(/[/+=]/g, '_');
-  // Check if project already exists in config or as a folder
-  const config = await loadProjectConfig();
-  const projectDir = path.join(process.env.HOME, '.gemini', 'projects', projectName);
-  try {
-    await fs.access(projectDir);
-    throw new Error(`Project already exists for path: ${absolutePath}`);
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw error;
+    const stats = await fs.stat(absolutePath);
+    if (!stats.isDirectory()) {
+      throw new Error('Path is not a directory');
     }
-  }
-  if (config[projectName]) {
-    throw new Error(`Project already configured for path: ${absolutePath}`);
-  }
-  // Add to config as manually added project
-  config[projectName] = {
-    manuallyAdded: true,
-    originalPath: absolutePath
-  };
-  if (displayName) {
-    config[projectName].displayName = displayName;
-  }
-  await saveProjectConfig(config);
-  // Create the project directory
-  try {
-    await fs.mkdir(projectDir, { recursive: true });
   } catch (error) {
-    // console.error('Error creating project directory:', error);
+    if (error.code === 'ENOENT') {
+      throw new Error(`Path does not exist: ${absolutePath}`);
+    }
+    throw error;
   }
-  return {
-    name: projectName,
-    path: absolutePath,
-    fullPath: absolutePath,
-    displayName: displayName || await generateDisplayName(projectName, absolutePath),
-    isManuallyAdded: true,
-    sessions: []
-  };
+
+  try {
+    let config = { projects: {} };
+    if (fsSync.existsSync(projectsConfigPath)) {
+      const configData = fsSync.readFileSync(projectsConfigPath, 'utf8');
+      config = JSON.parse(configData);
+    }
+
+    if (!config.projects) {
+      config.projects = {};
+    }
+
+    // Check if path is already registered
+    if (config.projects[absolutePath]) {
+      // Already exists, just return the existing info
+      const name = config.projects[absolutePath];
+      return {
+        id: name,
+        name: name,
+        path: absolutePath,
+        fullPath: absolutePath,
+        displayName: name,
+        sessions: []
+      };
+    }
+
+    // Generate a unique project name (slugified basename)
+    let projectName = path.basename(absolutePath).toLowerCase().replace(/[^a-z0-9]/g, '-');
+    
+    // Ensure uniqueness
+    const existingNames = new Set(Object.values(config.projects));
+    let suffix = 1;
+    let finalName = projectName;
+    while (existingNames.has(finalName)) {
+      finalName = `${projectName}-${suffix}`;
+      suffix++;
+    }
+
+    // Add to config
+    config.projects[absolutePath] = finalName;
+    
+    // Save updated config
+    await fs.writeFile(projectsConfigPath, JSON.stringify(config, null, 2), 'utf8');
+
+    return {
+      id: finalName,
+      name: finalName,
+      path: absolutePath,
+      fullPath: absolutePath,
+      displayName: finalName,
+      sessions: []
+    };
+  } catch (error) {
+    // console.error('Error in addProjectManually:', error);
+    throw new Error(`Failed to update projects configuration: ${error.message}`);
+  }
 }
 
 
@@ -562,7 +496,6 @@ export {
   parseJsonlSessions,
   renameProject,
   deleteSession,
-  isProjectEmpty,
   deleteProject,
   addProjectManually,
   loadProjectConfig,

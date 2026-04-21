@@ -27,7 +27,7 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
     },
     {
       id: 'spec',
-      icon: 'FileText',
+      icon: FileText,
       onClick: () => setActiveTab('spec')
     }
   ];

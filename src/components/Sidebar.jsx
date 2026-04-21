@@ -60,11 +60,7 @@ function Sidebar({
   onProjectDelete,
   isLoading,
   onRefresh,
-  onShowSettings,
-  updateAvailable,
-  latestVersion,
-  currentVersion,
-  onShowVersionModal
+  onShowSettings
 }) {
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
@@ -72,6 +68,10 @@ function Sidebar({
   const [editingName, setEditingName] = useState('');
   const [newProjectPath, setNewProjectPath] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
+  const [isBrowsing, setIsBrowsing] = useState(false);
+  const [browsePath, setBrowsePath] = useState('');
+  const [browseDirs, setDirectories] = useState([]);
+  const [isBrowseLoading, setIsBrowseLoading] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState({});
   const [additionalSessions, setAdditionalSessions] = useState({});
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState(new Set());
@@ -235,7 +235,7 @@ function Sidebar({
   };
 
   // Combined sorting: starred projects first, then by selected order
-  const sortedProjects = [...projects].sort((a, b) => {
+  const sortedProjects = Array.isArray(projects) ? [...projects].sort((a, b) => {
     const aStarred = isProjectStarred(a.name);
     const bStarred = isProjectStarred(b.name);
 
@@ -257,7 +257,7 @@ function Sidebar({
       const nameB = b.displayName || b.name;
       return nameA.localeCompare(nameB);
     }
-  });
+  }) : [];
 
   const startEditing = (project) => {
     setEditingProject(project.name);
@@ -375,6 +375,33 @@ function Sidebar({
   const cancelNewProject = () => {
     setShowNewProject(false);
     setNewProjectPath('');
+    setIsBrowsing(false);
+  };
+
+  const handleBrowse = async (path = '') => {
+    setIsBrowseLoading(true);
+    setIsBrowsing(true);
+    try {
+      const response = await api.browseDirectories(path);
+      if (response.ok) {
+        const data = await response.json();
+        setDirectories(data.directories);
+        setBrowsePath(data.currentPath);
+        setNewProjectPath(data.currentPath);
+      }
+    } catch (error) {
+      console.error('Error browsing directories:', error);
+    } finally {
+      setIsBrowseLoading(false);
+    }
+  };
+
+  const handleSelectDir = (dir) => {
+    if (dir.name === '..') {
+      handleBrowse(dir.path);
+    } else {
+      handleBrowse(dir.path);
+    }
   };
 
   const loadMoreSessions = async (project) => {
@@ -425,6 +452,33 @@ function Sidebar({
     // Search in both display name and actual project name/path
     return displayName.includes(searchLower) || projectName.includes(searchLower);
   });
+
+  const updateSessionSummary = async (projectName, sessionId, newSummary) => {
+    try {
+      // In a real app, this would call an API
+      // For now, we update local state if possible or just exit edit mode
+      setEditingSession(null);
+      setEditingSessionName('');
+      
+      // Optionally refresh to show changes
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error('Error updating session summary:', error);
+    }
+  };
+
+  const generateSessionSummary = async (projectName, sessionId) => {
+    setGeneratingSummary(prev => ({ ...prev, [`${projectName}-${sessionId}`]: true }));
+    try {
+      // Logic for AI summary generation would go here
+      // For now, just a placeholder delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error('Error generating session summary:', error);
+    } finally {
+      setGeneratingSummary(prev => ({ ...prev, [`${projectName}-${sessionId}`]: false }));
+    }
+  };
 
   return (
     <div className="h-full flex flex-col bg-card md:select-none">
@@ -518,21 +572,67 @@ function Sidebar({
               <FolderPlus className="w-4 h-4" />
               Create New Project
             </div>
-            <Input
-              value={newProjectPath}
-              onChange={(e) => setNewProjectPath(e.target.value)}
-              placeholder="/path/to/project or relative/path"
-              className="text-sm focus:ring-2 focus:ring-primary/20"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  createNewProject();
-                }
-                if (e.key === 'Escape') {
-                  cancelNewProject();
-                }
-              }}
-            />
+            <div className="flex gap-2">
+              <Input
+                value={newProjectPath}
+                onChange={(e) => setNewProjectPath(e.target.value)}
+                placeholder="/path/to/project"
+                className="text-sm focus:ring-2 focus:ring-primary/20 flex-1"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    createNewProject();
+                  }
+                  if (e.key === 'Escape') {
+                    cancelNewProject();
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleBrowse(newProjectPath)}
+                className="h-9 w-9 px-0"
+                title="Browse server folders"
+              >
+                <FolderOpen className="w-4 h-4" />
+              </Button>
+            </div>
+
+            {isBrowsing && (
+              <div className="mt-2 border border-border rounded-md bg-background/50 overflow-hidden">
+                <div className="px-2 py-1 bg-muted/50 text-[10px] font-medium text-muted-foreground truncate border-b border-border">
+                  {browsePath}
+                </div>
+                <ScrollArea className="h-40">
+                  <div className="p-1 space-y-0.5">
+                    {isBrowseLoading ? (
+                      <div className="py-8 text-center">
+                        <div className="w-4 h-4 animate-spin rounded-full border-2 border-primary border-t-transparent mx-auto" />
+                      </div>
+                    ) : browseDirs.length === 0 ? (
+                      <div className="py-4 text-center text-xs text-muted-foreground">No folders found</div>
+                    ) : (
+                      browseDirs.map((dir) => (
+                        <button
+                          key={dir.path}
+                          onClick={() => handleSelectDir(dir)}
+                          className={cn(
+                            "w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left hover:bg-accent transition-colors",
+                            dir.isGeminiProject && "text-primary font-medium"
+                          )}
+                        >
+                          <Folder className={cn("w-3.5 h-3.5", dir.isParent ? "opacity-50" : dir.isGeminiProject ? "text-primary" : "text-muted-foreground")} />
+                          <span className="truncate flex-1">{dir.name}</span>
+                          {dir.isGeminiProject && <Sparkles className="w-3 h-3 text-primary" />}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -576,35 +676,78 @@ function Sidebar({
               </div>
 
               <div className="space-y-3">
-                <Input
-                  value={newProjectPath}
-                  onChange={(e) => setNewProjectPath(e.target.value)}
-                  placeholder="/path/to/project or relative/path"
-                  className="text-sm h-10 rounded-md focus:border-primary transition-colors"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      createNewProject();
-                    }
-                    if (e.key === 'Escape') {
-                      cancelNewProject();
-                    }
-                  }}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    value={newProjectPath}
+                    onChange={(e) => setNewProjectPath(e.target.value)}
+                    placeholder="/path/to/project"
+                    className="text-sm h-10 rounded-md focus:border-primary transition-colors flex-1"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        createNewProject();
+                      }
+                      if (e.key === 'Escape') {
+                        cancelNewProject();
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    className="h-10 w-10 px-0"
+                    onClick={() => handleBrowse(newProjectPath)}
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {isBrowsing && (
+                  <div className="border border-border rounded-md bg-muted/20 overflow-hidden">
+                    <div className="px-2 py-1 bg-muted/50 text-[10px] font-medium text-muted-foreground truncate border-b border-border">
+                      {browsePath}
+                    </div>
+                    <ScrollArea className="h-40">
+                      <div className="p-1 space-y-0.5">
+                        {isBrowseLoading ? (
+                          <div className="py-8 text-center">
+                            <div className="w-4 h-4 animate-spin rounded-full border-2 border-primary border-t-transparent mx-auto" />
+                          </div>
+                        ) : browseDirs.length === 0 ? (
+                          <div className="py-4 text-center text-xs text-muted-foreground">No folders found</div>
+                        ) : (
+                          browseDirs.map((dir) => (
+                            <button
+                              key={dir.path}
+                              onClick={() => handleSelectDir(dir)}
+                              className={cn(
+                                "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-left hover:bg-accent transition-colors",
+                                dir.isGeminiProject && "text-primary font-medium"
+                              )}
+                            >
+                              <Folder className={cn("w-4 h-4", dir.isParent ? "opacity-50" : dir.isGeminiProject ? "text-primary" : "text-muted-foreground")} />
+                              <span className="truncate flex-1">{dir.name}</span>
+                              {dir.isGeminiProject && <Sparkles className="w-3.5 h-3.5 text-primary" />}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
 
                 <div className="flex gap-2">
                   <Button
                     onClick={cancelNewProject}
                     disabled={creatingProject}
                     variant="outline"
-                    className="flex-1 h-9 text-sm rounded-md active:scale-95 transition-transform"
+                    className="flex-1 h-10 text-sm rounded-md active:scale-95 transition-transform"
                   >
                     Cancel
                   </Button>
                   <Button
                     onClick={createNewProject}
                     disabled={!newProjectPath.trim() || creatingProject}
-                    className="flex-1 h-9 text-sm rounded-md bg-primary hover:bg-primary/90 active:scale-95 transition-all"
+                    className="flex-1 h-10 text-sm rounded-md bg-primary hover:bg-primary/90 active:scale-95 transition-all"
                   >
                     {creatingProject ? 'Creating...' : 'Create'}
                   </Button>
@@ -1257,50 +1400,6 @@ function Sidebar({
           )}
         </div>
       </ScrollArea>
-      
-      {/* Version Update Notification */}
-      {updateAvailable && (
-        <div className="md:p-2 border-t border-border/50 flex-shrink-0">
-          {/* Desktop Version Notification */}
-          <div className="hidden md:block">
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-3 p-3 h-auto font-normal text-left hover:bg-gemini-50 dark:hover:bg-gemini-900/20 transition-colors duration-200 border border-gemini-200 dark:border-gemini-700 rounded-lg mb-2"
-              onClick={onShowVersionModal}
-            >
-              <div className="relative">
-                <svg className="w-4 h-4 text-gemini-600 dark:text-gemini-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                </svg>
-                <div className="absolute -top-1 -right-1 w-2 h-2 bg-gemini-500 rounded-full animate-pulse" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-gemini-700 dark:text-gemini-300">Update Available</div>
-                <div className="text-xs text-gemini-600 dark:text-gemini-400">Version {latestVersion} is ready</div>
-              </div>
-            </Button>
-          </div>
-          
-          {/* Mobile Version Notification */}
-          <div className="md:hidden p-3 pb-2">
-            <button
-              className="w-full h-12 bg-gemini-50 dark:bg-gemini-900/20 border border-gemini-200 dark:border-gemini-700 rounded-xl flex items-center justify-start gap-3 px-4 active:scale-[0.98] transition-all duration-150"
-              onClick={onShowVersionModal}
-            >
-              <div className="relative">
-                <svg className="w-5 h-5 text-gemini-600 dark:text-gemini-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                </svg>
-                <div className="absolute -top-1 -right-1 w-2 h-2 bg-gemini-500 rounded-full animate-pulse" />
-              </div>
-              <div className="min-w-0 flex-1 text-left">
-                <div className="text-sm font-medium text-gemini-700 dark:text-gemini-300">Update Available</div>
-                <div className="text-xs text-gemini-600 dark:text-gemini-400">Version {latestVersion} is ready</div>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
       
       {/* Settings Section */}
       <div className="md:p-2 md:border-t md:border-border flex-shrink-0">

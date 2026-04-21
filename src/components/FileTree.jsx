@@ -322,8 +322,22 @@ function FileTree({ selectedProject }) {
     <div className="h-full flex flex-col bg-card">
       {/* View Mode Toggle */}
       <div className="p-4 border-b border-border flex items-center justify-between">
-        <h3 className="text-sm font-medium text-foreground">Files</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-foreground">Files</h3>
+          {loading && <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+        </div>
         <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={fetchFiles}
+            disabled={loading}
+            title="Refresh files"
+          >
+            <Eye className={cn("w-4 h-4", loading && "animate-pulse")} />
+          </Button>
+          <div className="w-px h-4 bg-border mx-1" />
           <Button
             variant={viewMode === 'simple' ? 'default' : 'ghost'}
             size="sm"

@@ -5,12 +5,20 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { extractProjectDirectory } from '../projects.js';
 
+import { getProjects } from '../projects.js';
+
 const router = express.Router();
 const execAsync = promisify(exec);
 
 // Helper function to get the actual project path from the encoded project name
 async function getActualProjectPath(projectName) {
   try {
+    const projects = await getProjects();
+    const project = projects.find(p => p.name === projectName);
+    if (project) {
+      return project.path;
+    }
+    // Fallback to extraction if not found in current project list
     return await extractProjectDirectory(projectName);
   } catch (error) {
     // console.error(`Error extracting project directory for ${projectName}:`, error);
