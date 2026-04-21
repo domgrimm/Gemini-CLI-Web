@@ -79,6 +79,60 @@ This fork has been extensively modernized with native-style mobile interfaces, r
 
 ---
 
+## 🌐 Production & Auto-start
+
+For permanent use or setting up the UI on a remote server, it is recommended to run the application in production mode.
+
+### 1. Build the Frontend
+Generate the optimized production files:
+```bash
+npm run build
+```
+In production mode, the server listens on port **4008** and serves both the API and the UI from that single port.
+
+### 2. Set up as a System Service (systemd)
+To ensure the server starts automatically at boot:
+
+1. Create a service file:
+   ```bash
+   sudo nano /etc/systemd/system/gemini-ui.service
+   ```
+2. Paste the following configuration (update `/path/to/Gemini-CLI-Web` and `your-user`):
+   ```ini
+   [Unit]
+   Description=Gemini CLI Web UI
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=your-user
+   WorkingDirectory=/path/to/Gemini-CLI-Web
+   ExecStart=/usr/bin/node server/index.js
+   Restart=on-failure
+   Environment=NODE_ENV=production
+   Environment=PORT=4008
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+3. Enable and start:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable gemini-ui
+   sudo systemctl start gemini-ui
+   ```
+
+### 3. Alternative: Using PM2
+If you prefer [PM2](https://pm2.keymetrics.io/):
+```bash
+npm install -g pm2
+pm2 start server/index.js --name "gemini-ui"
+pm2 startup
+pm2 save
+```
+
+---
+
 ## 🔒 Security
 
 - **Single-User System**: Built-in authentication ensures only you can access your server's files and Gemini CLI.

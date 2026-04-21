@@ -47,6 +47,7 @@ function AppContent() {
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showToolsSettings, setShowToolsSettings] = useState(false);
+  const [usageStats, setUsageStats] = useState(null);
   // Session Protection System: Track sessions with active conversations to prevent
   // automatic project updates from interrupting ongoing chats. When a user sends
   // a message, the session is marked as "active" and project updates are paused
@@ -79,7 +80,18 @@ function AppContent() {
   useEffect(() => {
     // Fetch projects on component mount
     fetchProjects();
+    fetchUsage();
   }, []);
+
+  const fetchUsage = async () => {
+    try {
+      const response = await api.getUsage();
+      if (response.ok) {
+        const data = await response.json();
+        setUsageStats(data);
+      }
+    } catch (error) {}
+  };
 
   // Helper function to determine if an update is purely additive (new sessions/projects)
   // vs modifying existing selected items that would interfere with active conversations
@@ -90,8 +102,8 @@ function AppContent() {
     }
 
     // Find the selected project in both current and updated data
-    const currentSelectedProject = currentProjects?.find(p => p.name === selectedProject.name);
-    const updatedSelectedProject = updatedProjects?.find(p => p.name === selectedProject.name);
+    const currentSelectedProject = currentProjects?.find(p => p.name === selectedProject?.name);
+    const updatedSelectedProject = updatedProjects?.find(p => p.name === selectedProject?.name);
 
     if (!currentSelectedProject || !updatedSelectedProject) {
       // Project structure changed significantly, not purely additive
@@ -139,24 +151,28 @@ function AppContent() {
           // Continue with additive updates below
         }
         // Update projects state with the new data from WebSocket
-        const updatedProjects = latestMessage.projects;
-        setProjects(updatedProjects);
-        // Update selected project if it exists in the updated projects
-        if (selectedProject) {
-          const updatedSelectedProject = updatedProjects.find(p => p.name === selectedProject.name);
-          if (updatedSelectedProject) {
-            setSelectedProject(updatedSelectedProject);
-            // Update selected session only if it was deleted - avoid unnecessary reloads
-            if (selectedSession) {
-              const updatedSelectedSession = updatedSelectedProject.sessions?.find(s => s.id === selectedSession.id);
-              if (!updatedSelectedSession) {
-                // Session was deleted
-                setSelectedSession(null);
+        const rawUpdatedProjects = latestMessage.projects;
+        if (Array.isArray(rawUpdatedProjects)) {
+          const updatedProjects = rawUpdatedProjects.filter(Boolean);
+          setProjects(updatedProjects);
+          // Update selected project if it exists in the updated projects
+          if (selectedProject?.name) {
+            const updatedSelectedProject = updatedProjects.find(p => p.name === selectedProject.name);
+            if (updatedSelectedProject) {
+              setSelectedProject(updatedSelectedProject);
+              // Update selected session only if it was deleted - avoid unnecessary reloads
+              if (selectedSession) {
+                const updatedSelectedSession = updatedSelectedProject.sessions?.find(s => s.id === selectedSession.id);
+                if (!updatedSelectedSession) {
+                  // Session was deleted
+                  setSelectedSession(null);
+                }
               }
-              // Don't update if session still exists with same ID - prevents reload
             }
           }
         }
+      } else if (latestMessage.type === 'gemini-usage-updated') {
+        setUsageStats(latestMessage.stats);
       }
     }
   }, [messages, selectedProject, selectedSession, activeSessions]);
@@ -165,39 +181,27 @@ function AppContent() {
     try {
       setIsLoadingProjects(true);
       const response = await api.projects();
-      const data = await response.json();
+      const rawData = await response.json();
       
-      if (!Array.isArray(data)) {
-        console.error('Projects data is not an array:', data);
+      if (!Array.isArray(rawData)) {
+        console.error('Projects data is not an array:', rawData);
         setIsLoadingProjects(false);
         return;
       }
 
+      // Ensure every project is valid and has a sessions array to prevent crashes
+      const data = rawData.filter(Boolean).map(p => ({
+        ...p,
+        sessions: Array.isArray(p.sessions) ? p.sessions : []
+      }));
+
       // Optimize to preserve object references when data hasn't changed
       setProjects(prevProjects => {
-        // If no previous projects, just set the new data
-        if (prevProjects.length === 0) {
-          return data;
-        }
-        // Check if the projects data has actually changed
-        const hasChanges = data.some((newProject, index) => {
-          const prevProject = prevProjects[index];
-          if (!prevProject) {
-            return true;
-          }
-          // Compare key properties that would affect UI
-          return (
-            newProject.name !== prevProject.name ||
-            newProject.displayName !== prevProject.displayName ||
-            newProject.fullPath !== prevProject.fullPath ||
-            JSON.stringify(newProject.sessionMeta) !== JSON.stringify(prevProject.sessionMeta) ||
-            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions)
-          );
-        }) || data.length !== prevProjects.length;
-        // Only update if there are actual changes
+        if (prevProjects.length === 0) return data;
+        const hasChanges = data.length !== prevProjects.length || 
+          data.some((p, i) => JSON.stringify(p) !== JSON.stringify(prevProjects[i]));
         return hasChanges ? data : prevProjects;
       });
-      // Don't auto-select any project - user should choose manually
     } catch (error) {
       console.error('Error fetching projects:', error);
     } finally {
@@ -286,39 +290,31 @@ function AppContent() {
 
 
   const handleSidebarRefresh = async () => {
-    // Refresh only the sessions for all projects, don't change selected state
     try {
       const response = await api.projects();
-      const freshProjects = await response.json();
-      // Optimize to preserve object references and minimize re-renders
+      const rawData = await response.json();
+      
+      if (!Array.isArray(rawData)) return;
+
+      const freshProjects = rawData.filter(Boolean).map(p => ({
+        ...p,
+        sessions: Array.isArray(p.sessions) ? p.sessions : []
+      }));
+
       setProjects(prevProjects => {
-        // Check if projects data has actually changed
-        const hasChanges = freshProjects.some((newProject, index) => {
-          const prevProject = prevProjects[index];
-          if (!prevProject) {
-            return true;
-          }
-          return (
-            newProject.name !== prevProject.name ||
-            newProject.displayName !== prevProject.displayName ||
-            newProject.fullPath !== prevProject.fullPath ||
-            JSON.stringify(newProject.sessionMeta) !== JSON.stringify(prevProject.sessionMeta) ||
-            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions)
-          );
-        }) || freshProjects.length !== prevProjects.length;
+        const hasChanges = freshProjects.length !== prevProjects.length || 
+          freshProjects.some((p, i) => JSON.stringify(p) !== JSON.stringify(prevProjects[i]));
         return hasChanges ? freshProjects : prevProjects;
       });
-      // If we have a selected project, make sure it's still selected after refresh
-      if (selectedProject) {
+
+      if (selectedProject?.name) {
         const refreshedProject = freshProjects.find(p => p.name === selectedProject.name);
         if (refreshedProject) {
-          // Only update selected project if it actually changed
           if (JSON.stringify(refreshedProject) !== JSON.stringify(selectedProject)) {
             setSelectedProject(refreshedProject);
           }
-          // If we have a selected session, try to find it in the refreshed project
           if (selectedSession) {
-            const refreshedSession = refreshedProject.sessions?.find(s => s.id === selectedSession.id);
+            const refreshedSession = (refreshedProject.sessions || []).find(s => s.id === selectedSession.id);
             if (refreshedSession && JSON.stringify(refreshedSession) !== JSON.stringify(selectedSession)) {
               setSelectedSession(refreshedSession);
             }
@@ -400,6 +396,7 @@ function AppContent() {
               isLoading={isLoadingProjects}
               onRefresh={handleSidebarRefresh}
               onShowSettings={() => setShowToolsSettings(true)}
+              usageStats={usageStats}
             />
           </div>
         </div>
@@ -407,7 +404,7 @@ function AppContent() {
 
       {/* Mobile Sidebar Overlay */}
       {isMobile && (
-        <div className={`fixed inset-0 z-50 flex transition-all duration-150 ease-out ${
+        <div className={`fixed inset-0 z-[100] flex transition-all duration-150 ease-out ${
           sidebarOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
         }`}>
           <div
@@ -423,7 +420,7 @@ function AppContent() {
             }}
           />
           <div
-            className={`relative w-[85vw] max-w-sm sm:w-80 bg-card border-r border-border h-full transform transition-transform duration-150 ease-out ${
+            className={`relative w-[85vw] max-w-sm sm:w-80 bg-zinc-50 dark:bg-zinc-950 border-r border-border h-full shadow-2xl transform transition-transform duration-150 ease-out ${
               sidebarOpen ? 'translate-x-0' : '-translate-x-full'
             }`}
             onClick={(e) => e.stopPropagation()}
@@ -441,6 +438,7 @@ function AppContent() {
               isLoading={isLoadingProjects}
               onRefresh={handleSidebarRefresh}
               onShowSettings={() => setShowToolsSettings(true)}
+              usageStats={usageStats}
             />
           </div>
         </div>

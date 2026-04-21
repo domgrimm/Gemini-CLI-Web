@@ -89,6 +89,13 @@ async function spawnGemini(command, options = {}, ws) {
     const modelToUse = options.model || 'auto-gemini-3';
     args.push('--model', modelToUse);
     
+    // Update request count in stats
+    const currentStats = sessionManager.getStats();
+    if (currentStats.limits) {
+      currentStats.limits.requests_used = (currentStats.limits.requests_used || 0) + 1;
+      sessionManager.saveStats();
+    }
+    
     const geminiPath = process.env.GEMINI_PATH || 'gemini';
     
     const geminiProcess = spawn(geminiPath, args, {
@@ -235,6 +242,13 @@ async function spawnGemini(command, options = {}, ws) {
               
             case 'result':
               // Final result with stats
+              if (event.stats) {
+                sessionManager.addStats(event.stats);
+                ws.send(JSON.stringify({
+                  type: 'gemini-usage-updated',
+                  stats: sessionManager.getStats()
+                }));
+              }
               break;
           }
         } catch (e) {

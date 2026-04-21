@@ -145,7 +145,9 @@ async function getProjects() {
         name: path.basename(cwd),
         path: cwd,
         displayName: path.basename(cwd),
-        fullPath: cwd
+        fullPath: cwd,
+        sessions: [],
+        sessionMeta: { total: 0, hasMore: false }
       });
     }
   } catch (error) {

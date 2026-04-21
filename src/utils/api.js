@@ -72,6 +72,10 @@ export const api = {
     }),
   getFiles: (projectName) =>
     authenticatedFetch(`/api/projects/${projectName}/files`),
+  getUsage: () =>
+    authenticatedFetch('/api/usage'),
+  refreshUsage: () =>
+    authenticatedFetch('/api/usage/refresh', { method: 'POST' }),
   browseDirectories: (dirPath) =>
     authenticatedFetch(`/api/browse-directories?dirPath=${encodeURIComponent(dirPath || '')}`),
   transcribe: (formData) =>

@@ -26,9 +26,6 @@ function ChatSidebar({
   onReplaceTemporarySession,
   onNavigateToSession,
   onShowSettings,
-  autoExpandTools,
-  showRawParameters,
-  autoScrollToBottom,
   isIntegrated = false // New prop to determine if it's integrated in layout or overlay
 }) {
   const [width, setWidth] = React.useState(400);
@@ -111,9 +108,6 @@ function ChatSidebar({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
-            showRawParameters={showRawParameters}
-            autoScrollToBottom={autoScrollToBottom}
           />
         </div>
       </div>
@@ -181,9 +175,6 @@ function ChatSidebar({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
-            showRawParameters={showRawParameters}
-            autoScrollToBottom={autoScrollToBottom}
           />
         </div>
       </div>

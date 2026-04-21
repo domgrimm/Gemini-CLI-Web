@@ -61,7 +61,7 @@ function MainContent({
       <div className="h-full flex flex-col" style={{ minHeight: '100vh' }}>
         {/* Header with menu button for mobile */}
         {isMobile && (
-          <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 shrink-0">
+          <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 shrink-0 ios-top-safe">
             <button
               onClick={onMenuClick}
               className="p-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all duration-300 morph-hover"
@@ -97,7 +97,7 @@ function MainContent({
       <div className="h-full flex flex-col">
         {/* Header with menu button for mobile */}
         {isMobile && (
-          <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 flex-shrink-0">
+          <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 flex-shrink-0 ios-top-safe">
             <button
               onClick={onMenuClick}
               className="p-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-700"
@@ -133,7 +133,7 @@ function MainContent({
   return (
     <div className="h-full flex flex-col">
       {/* Header with tabs */}
-      <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 flex-shrink-0">
+      <div className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 p-3 sm:p-4 flex-shrink-0 ios-top-safe">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 sm:space-x-3">
             {isMobile && (
@@ -150,35 +150,30 @@ function MainContent({
                 </svg>
               </button>
             )}
+            
             <div className="min-w-0">
-              {activeTab === 'chat' && selectedSession ? (
-                <div>
-                  <h2 className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-white truncate">
-                    {selectedSession.summary}
-                  </h2>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                    {selectedProject.displayName} <span className="hidden sm:inline">• {selectedSession.id}</span>
-                  </div>
+              <div className="flex flex-col min-w-0">
+                <h2 className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-white truncate">
+                  {(() => {
+                    if (activeTab === 'chat') return selectedSession?.summary || 'New Chat';
+                    if (activeTab === 'files') return 'File Explorer';
+                    if (activeTab === 'shell') return 'Terminal';
+                    if (activeTab === 'git') return 'Source Control';
+                    if (activeTab === 'editor') return 'Code Editor';
+                    if (activeTab === 'spec') return 'Spec Design';
+                    return 'Project';
+                  })()}
+                </h2>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate flex items-center gap-1">
+                  <span>{selectedProject?.displayName || selectedProject?.name || 'Project'}</span>
+                  {activeTab === 'chat' && selectedSession && (
+                    <>
+                      <span className="opacity-40">•</span>
+                      <span className="font-mono opacity-60 text-[10px]">{(selectedSession.id || '').slice(0, 8)}...</span>
+                    </>
+                  )}
                 </div>
-              ) : activeTab === 'chat' && !selectedSession ? (
-                <div>
-                  <h2 className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-white">
-                    New Session
-                  </h2>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                    {selectedProject.displayName}
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <h2 className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-white">
-                    {activeTab === 'files' ? 'Project Files' : activeTab === 'git' ? 'Source Control' : 'Project'}
-                  </h2>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                    {selectedProject.displayName}
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
 
@@ -311,7 +306,8 @@ function MainContent({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            />        </div>
+          />
+        </div>
         <div className={`h-full overflow-hidden ${activeTab === 'files' ? 'block' : 'hidden'}`}>
           <FileTree selectedProject={selectedProject} />
         </div>
@@ -320,9 +316,9 @@ function MainContent({
             selectedProject={selectedProject}
             selectedSession={selectedSession}
             isActive={activeTab === 'shell'}
+            onInputFocusChange={onInputFocusChange}
           />
-        </div>
-        <div className={`h-full overflow-hidden ${activeTab === 'git' ? 'block' : 'hidden'}`}>
+        </div>        <div className={`h-full overflow-hidden ${activeTab === 'git' ? 'block' : 'hidden'}`}>
           <GitPanel selectedProject={selectedProject} isMobile={isMobile} />
         </div>
         <div className={`h-full overflow-hidden ${activeTab === 'editor' ? 'block' : 'hidden'}`}>
@@ -336,7 +332,8 @@ function MainContent({
             onReplaceTemporarySession={onReplaceTemporarySession}
             onNavigateToSession={onNavigateToSession}
             onShowSettings={onShowSettings}
-            />        </div>
+          />
+        </div>
         <div className={`h-full overflow-hidden ${activeTab === 'spec' ? 'block' : 'hidden'}`}>
           <SpecDesign selectedProject={selectedProject} />
         </div>

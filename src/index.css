@@ -55,7 +55,20 @@
   --radius-sm: calc(var(--radius) - 4px);
 
   /* Responsive spacing */
+  --spacing-safe-area-inset-top: env(safe-area-inset-top);
   --spacing-safe-area-inset-bottom: env(safe-area-inset-bottom);
+}
+
+@layer utilities {
+  .ios-top-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .ios-bottom-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ios-bottom-margin-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 @custom-variant dark (&:where(.dark, .dark *));

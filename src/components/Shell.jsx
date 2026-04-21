@@ -29,7 +29,12 @@ if (typeof document !== 'undefined') {
 // Global store for shell sessions to persist across tab switches
 const shellSessions = new Map();
 
-function Shell({ selectedProject, selectedSession, isActive }) {
+function Shell({ selectedProject, selectedSession, isActive, onInputFocusChange }) {
+  // Early return if no project is selected
+  if (!selectedProject) {
+    return null;
+  }
+
   const terminalRef = useRef(null);
   const terminal = useRef(null);
   const fitAddon = useRef(null);
@@ -39,6 +44,16 @@ function Shell({ selectedProject, selectedSession, isActive }) {
   const [isRestarting, setIsRestarting] = useState(false);
   const [lastSessionId, setLastSessionId] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+
+  // Handle focus state
+  useEffect(() => {
+    if (isFocused && onInputFocusChange) {
+      onInputFocusChange(true);
+    } else if (!isFocused && onInputFocusChange) {
+      onInputFocusChange(false);
+    }
+  }, [isFocused, onInputFocusChange]);
 
   // Connect to shell function
   const connectToShell = () => {
@@ -318,6 +333,12 @@ function Shell({ selectedProject, selectedSession, isActive }) {
 
     setIsInitialized(true);
 
+    // Handle terminal focus using the textarea element which is reliable across xterm versions
+    if (terminal.current.textarea) {
+      terminal.current.textarea.onfocus = () => setIsFocused(true);
+      terminal.current.textarea.onblur = () => setIsFocused(false);
+    }
+
     // Handle terminal input
     terminal.current.onData((data) => {
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -556,7 +577,9 @@ function Shell({ selectedProject, selectedSession, isActive }) {
   }
 
   return (
-    <div className="h-full flex flex-col bg-zinc-900 w-full glass-morphism-dark">
+    <div className={`h-full flex flex-col bg-zinc-900 w-full glass-morphism-dark transition-all duration-300 ${
+      isFocused ? 'pb-0' : 'pb-20 ios-bottom-safe'
+    }`}>
       {/* Header */}
       <div className="shrink-0 bg-zinc-800 border-b border-zinc-700 px-4 py-2">
         <div className="flex items-center justify-between">
@@ -564,7 +587,7 @@ function Shell({ selectedProject, selectedSession, isActive }) {
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
             {selectedSession && (
               <span className="text-xs text-gemini-300">
-                ({selectedSession.summary.slice(0, 30)}...)
+                ({(selectedSession.summary || 'Session').slice(0, 30)}...)
               </span>
             )}
             {!selectedSession && (
@@ -633,11 +656,10 @@ function Shell({ selectedProject, selectedSession, isActive }) {
               </button>
               <p className="text-zinc-400 text-sm mt-3 px-2">
                 {selectedSession ?
-                  `Resume session: ${selectedSession.summary.slice(0, 50)}...` : 
-                  'Start a new Gemini session'
+                  `Resume session: ${(selectedSession.summary || 'Previous Session').slice(0, 50)}...` :
+                  `Starting Gemini CLI in ${selectedProject?.displayName || 'project'}`
                 }
-              </p>
-            </div>
+              </p>            </div>
           </div>
         )}
 

@@ -446,8 +446,6 @@ app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) 
       actualPath = projectName.replace(/-/g, '/');
     }
     
-    console.log(`📂 Fetching file tree for project: ${projectName} at path: ${actualPath}`);
-    
     // Check if path exists
     try {
       await fsPromises.access(actualPath);
@@ -457,7 +455,6 @@ app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) 
     }
 
     const files = await getFileTree(actualPath, 3, 0, true);
-    console.log(`✅ Found ${files.length} top-level items for ${projectName}`);
     res.json(files);
   } catch (error) {
     console.error(`❌ File tree error for ${req.params.projectName}:`, error.message);
@@ -880,6 +877,24 @@ app.post('/api/projects/:projectName/upload-images', authenticateToken, async (r
   }
 });
 
+app.get('/api/usage', authenticateToken, (req, res) => {
+  res.json(sessionManager.getStats());
+});
+
+app.post('/api/usage/refresh', authenticateToken, async (req, res) => {
+  try {
+    await sessionManager.refreshQuota();
+    res.json(sessionManager.getStats());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Periodic quota refresh (every 30 minutes)
+setInterval(() => {
+  sessionManager.refreshQuota();
+}, 30 * 60 * 1000);
+
 // Serve React app for all other routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../dist/index.html'));
@@ -897,13 +912,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
   // Using fsPromises from import
   const items = [];
   try {
-    if (currentDepth === 0) {
-      console.log(`🔍 getFileTree: Reading directory ${dirPath}`);
-    }
     const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
-    if (currentDepth === 0) {
-      console.log(`🔍 getFileTree: Found ${entries.length} raw entries`);
-    }
     for (const entry of entries) {
       // Debug: log all entries including hidden files
       // Skip only heavy build directories

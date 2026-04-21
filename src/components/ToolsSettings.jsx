@@ -560,9 +560,9 @@ function ToolsSettings({ isOpen, onClose }) {
   }
 
   return (
-    <div className="modal-backdrop fixed inset-0 flex items-center justify-center z-[100] md:p-4 bg-background/95 glass-morphism">
+    <div className="modal-backdrop fixed inset-0 flex items-center justify-center z-[110] md:p-4 bg-background/95 glass-morphism">
       <div className="bg-background border border-border md:rounded-lg shadow-elevated w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col glass-morphism dark:glass-morphism-dark">
-        <div className="flex items-center justify-between p-4 md:p-6 border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between p-4 md:p-6 border-b border-border flex-shrink-0 ios-top-safe">
           <div className="flex items-center gap-3">
             <Settings className="w-5 h-5 md:w-6 md:h-6 text-gemini-500" />
             <h2 className="text-lg md:text-xl font-semibold text-foreground">

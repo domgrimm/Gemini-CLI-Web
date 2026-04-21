@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 
-import { FolderOpen, Folder, Plus, MessageSquare, Clock, ChevronDown, ChevronRight, Edit3, Check, X, Trash2, Settings, FolderPlus, RefreshCw, Sparkles, Edit2, Star, Search } from 'lucide-react';
+import { FolderOpen, Folder, Plus, MessageSquare, Clock, ChevronDown, ChevronUp, ChevronRight, Edit3, Check, X, Trash2, Settings, FolderPlus, RefreshCw, Sparkles, Edit2, Star, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 import GeminiLogo from './GeminiLogo';
 import { api } from '../utils/api';
@@ -60,7 +60,8 @@ function Sidebar({
   onProjectDelete,
   isLoading,
   onRefresh,
-  onShowSettings
+  onShowSettings,
+  usageStats
 }) {
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [editingProject, setEditingProject] = useState(null);
@@ -82,6 +83,7 @@ function Sidebar({
   const [editingSessionName, setEditingSessionName] = useState('');
   const [generatingSummary, setGeneratingSummary] = useState({});
   const [searchFilter, setSearchFilter] = useState('');
+  const [showUsage, setShowUsage] = useState(false);
 
   // Starred projects state - persisted in localStorage
   const [starredProjects, setStarredProjects] = useState(() => {
@@ -215,6 +217,7 @@ function Sidebar({
 
   // Helper function to get all sessions for a project (initial + additional)
   const getAllSessions = (project) => {
+    if (!project) return [];
     const initialSessions = project.sessions || [];
     const additional = additionalSessions[project.name] || [];
     return [...initialSessions, ...additional];
@@ -222,6 +225,7 @@ function Sidebar({
 
   // Helper function to get the last activity date for a project
   const getProjectLastActivity = (project) => {
+    if (!project) return new Date(0);
     const allSessions = getAllSessions(project);
     if (allSessions.length === 0) {
       return new Date(0); // Return epoch date for projects with no sessions
@@ -235,7 +239,7 @@ function Sidebar({
   };
 
   // Combined sorting: starred projects first, then by selected order
-  const sortedProjects = Array.isArray(projects) ? [...projects].sort((a, b) => {
+  const sortedProjects = Array.isArray(projects) ? projects.filter(Boolean).sort((a, b) => {
     const aStarred = isProjectStarred(a.name);
     const bStarred = isProjectStarred(b.name);
 
@@ -483,9 +487,9 @@ function Sidebar({
   return (
     <div className="h-full flex flex-col bg-card md:select-none">
       {/* Header */}
-      <div className="md:p-4 md:border-b md:border-border">
+      <div className="p-4 md:p-4 md:border-b md:border-border ios-top-safe">
         {/* Desktop Header */}
-        <div className="hidden md:flex items-center justify-between">
+        <div className="hidden md:flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-layered glow-sidebar">
               <MessageSquare className="w-4 h-4 text-primary-foreground" />
@@ -886,7 +890,8 @@ function Sidebar({
                                   </h3>
                                   <p className="text-xs text-muted-foreground">
                                     {(() => {
-                                      const sessionCount = getAllSessions(project).length;
+                                      const allSessions = getAllSessions(project) || [];
+                                      const sessionCount = allSessions.length;
                                       const hasMore = project.sessionMeta?.hasMore !== false;
                                       const count = hasMore && sessionCount >= 5 ? `${sessionCount}+` : sessionCount;
                                       return `${count} session${count === 1 ? '' : 's'}`;
@@ -1036,11 +1041,12 @@ function Sidebar({
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 {(() => {
-                                  const sessionCount = getAllSessions(project).length;
+                                  const allSessions = getAllSessions(project) || [];
+                                  const sessionCount = allSessions.length;
                                   const hasMore = project.sessionMeta?.hasMore !== false;
                                   return hasMore && sessionCount >= 5 ? `${sessionCount}+` : sessionCount;
                                 })()}
-                                {project.fullPath !== project.displayName && (
+                                {project.fullPath && project.fullPath !== project.displayName && (
                                   <span className="ml-1 opacity-60" title={project.fullPath}>
                                     • {project.fullPath.length > 25 ? '...' + project.fullPath.slice(-22) : project.fullPath}
                                   </span>
@@ -1145,12 +1151,12 @@ function Sidebar({
                             </div>
                           </div>
                         ))
-                      ) : getAllSessions(project).length === 0 && !loadingSessions[project.name] ? (
+                      ) : (getAllSessions(project) || []).length === 0 && !loadingSessions[project.name] ? (
                         <div className="py-2 px-3 text-left">
                           <p className="text-xs text-muted-foreground">No sessions yet</p>
                         </div>
                       ) : (
-                        getAllSessions(project).map((session) => {
+                        (getAllSessions(project) || []).map((session) => {
                           // Calculate if session is active (within last 10 minutes)
                           const sessionDate = new Date(session.lastActivity);
                           const diffInMinutes = Math.floor((currentTime - sessionDate) / (1000 * 60));
@@ -1401,10 +1407,224 @@ function Sidebar({
         </div>
       </ScrollArea>
       
-      {/* Settings Section */}
+      {/* Model Usage & Settings Section */}
       <div className="md:p-2 md:border-t md:border-border flex-shrink-0">
-        {/* Mobile Settings */}
-        <div className="md:hidden p-4 pb-20 border-t border-border/50">
+        {/* Desktop Model Usage */}
+        <div className="hidden md:block mb-1">
+          <button
+            onClick={() => setShowUsage(!showUsage)}
+            className="w-full flex items-center justify-between p-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors group"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-3 h-3 text-gemini-500" />
+              <span>Model Usage</span>
+            </div>
+            {showUsage ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+          
+          {showUsage && usageStats && (
+            <div className="mt-1 mx-2 p-3 space-y-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-border/50 shadow-inner animate-in slide-in-from-top-2 duration-200">
+              {/* Plan Info */}
+              <div className="flex items-center justify-between pb-2 border-b border-border/30">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Active Plan</div>
+                <div className="text-[10px] font-bold text-gemini-600 bg-gemini-50 dark:bg-gemini-900/30 px-1.5 py-0.5 rounded-full border border-gemini-200 dark:border-gemini-800">
+                  {usageStats.plan || 'Standard'}
+                </div>
+              </div>
+
+              {/* Token Usage */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Token Consumption</div>
+                  <div className="text-[10px] font-mono text-foreground">
+                    {usageStats.total_tokens.toLocaleString()} / {(usageStats.limits?.token_limit || 1000000).toLocaleString()}
+                  </div>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gemini-500 rounded-full transition-all duration-1000 ease-out" 
+                    style={{ width: `${Math.min((usageStats.total_tokens / (usageStats.limits?.token_limit || 1000000)) * 100, 100)}%` }} 
+                  />
+                </div>
+              </div>
+
+              {/* Request Quota */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Request Quota</div>
+                  <div className="text-[10px] font-mono text-foreground">
+                    {usageStats.limits?.requests_used || 0} / {usageStats.limits?.daily_requests || 500}
+                  </div>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-orange-500 rounded-full transition-all duration-1000 ease-out" 
+                    style={{ width: `${Math.min(((usageStats.limits?.requests_used || 0) / (usageStats.limits?.daily_requests || 500)) * 100, 100)}%` }} 
+                  />
+                </div>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="space-y-0.5">
+                  <div className="text-[9px] uppercase text-muted-foreground">Input</div>
+                  <div className="text-xs font-mono font-semibold text-foreground">
+                    {usageStats.input_tokens.toLocaleString()}
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  <div className="text-[9px] uppercase text-muted-foreground">Output</div>
+                  <div className="text-xs font-mono font-semibold text-foreground">
+                    {usageStats.output_tokens.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Specific Model Quotas */}
+              <div className="pt-3 space-y-3 border-t border-border/30">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Model Limits</div>
+                  <button 
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await api.refreshUsage(); // Force refresh on server via PTY
+                      if (onRefresh) onRefresh();
+                    }}
+                    className="text-[9px] text-gemini-500 hover:text-gemini-700 font-medium"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                
+                {(!usageStats.quotas || usageStats.quotas.length === 0) ? (
+                  <div className="py-2 text-[10px] text-muted-foreground italic text-center">
+                    Fetching quota information...
+                  </div>
+                ) : (
+                  usageStats.quotas.map((quota, idx) => (
+                    <div key={idx} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-foreground/80">{quota.model}</span>
+                        <span className={cn(
+                          "font-mono font-bold",
+                          quota.percentage > 80 ? "text-red-500" : quota.percentage > 50 ? "text-orange-500" : "text-gemini-600"
+                        )}>
+                          {quota.percentage}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className={cn(
+                            "h-full rounded-full transition-all duration-1000 ease-out",
+                            quota.percentage > 80 ? "bg-red-500" : quota.percentage > 50 ? "bg-orange-500" : "bg-gemini-500"
+                          )} 
+                          style={{ width: `${quota.percentage}%` }} 
+                        />
+                      </div>
+                      <div className="text-[9px] text-muted-foreground flex items-center gap-1">
+                        <Clock className="w-2.5 h-2.5" />
+                        <span>Resets: {quota.resets}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              <div className="flex items-center justify-between text-[9px] text-muted-foreground pt-1">
+                <span>{usageStats.tool_calls} tool calls performed</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Mobile Settings & Usage */}
+        <div className="md:hidden p-4 pb-8 border-t border-border/50 ios-bottom-safe">
+          {/* Mobile Usage Summary (Togglable) */}
+          {usageStats && (
+            <div className="mb-4 space-y-2">
+              <button
+                onClick={() => setShowUsage(!showUsage)}
+                className="w-full p-4 bg-muted/30 hover:bg-muted/50 rounded-2xl flex items-center justify-between active:scale-[0.98] transition-all duration-150"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-background/80 flex items-center justify-center">
+                    <Sparkles className="w-5 h-5 text-gemini-500" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-bold text-foreground">Model Usage</div>
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-tight">Tap to view limits</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-mono bg-background/50 px-2 py-1 rounded-lg border border-border">
+                    {usageStats.total_tokens.toLocaleString()}
+                  </div>
+                  {showUsage ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </div>
+              </button>
+
+              {showUsage && (
+                <div className="mx-1 p-5 space-y-5 bg-background/40 backdrop-blur-md rounded-2xl border border-border/50 shadow-xl animate-in slide-in-from-top-4 duration-300">
+                  {/* Plan */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Active Plan</span>
+                    <span className="text-xs font-bold text-gemini-600 bg-gemini-50 dark:bg-gemini-900/40 px-2 py-0.5 rounded-full">
+                      {usageStats.plan}
+                    </span>
+                  </div>
+
+                  {/* Model Specific Limits */}
+                  <div className="space-y-4">
+                    {(!usageStats.quotas || usageStats.quotas.length === 0) ? (
+                      <div className="py-4 text-xs text-muted-foreground italic text-center">
+                        Refreshing quota data...
+                      </div>
+                    ) : (
+                      usageStats.quotas.map((quota, idx) => (
+                        <div key={idx} className="space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold">{quota.model}</span>
+                            <span className={cn(
+                              "font-mono font-bold",
+                              quota.percentage > 80 ? "text-red-500" : quota.percentage > 50 ? "text-orange-500" : "text-gemini-600"
+                            )}>
+                              {quota.percentage}%
+                            </span>
+                          </div>
+                          <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full transition-all duration-1000",
+                                quota.percentage > 80 ? "bg-red-500" : quota.percentage > 50 ? "bg-orange-500" : "bg-gemini-500"
+                              )} 
+                              style={{ width: `${quota.percentage}%` }} 
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>Resets: {quota.resets}</span>
+                            </div>
+                            <button 
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await api.refreshUsage();
+                                if (onRefresh) onRefresh();
+                              }}
+                              className="text-gemini-500 font-bold"
+                            >
+                              Refresh
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
           <button
             className="w-full h-14 bg-muted/50 hover:bg-muted/70 rounded-2xl flex items-center justify-start gap-4 px-4 active:scale-[0.98] transition-all duration-150"
             onClick={onShowSettings}

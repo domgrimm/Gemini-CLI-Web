@@ -45,11 +45,12 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
         `}
       </style>
       <div
-        className={`mobile-nav-container fixed bottom-0 left-0 right-0 border-t border-zinc-200 dark:border-zinc-700 z-50 ios-bottom-safe transform transition-transform duration-300 ease-in-out shadow-elevated glass-morphism dark:glass-morphism-dark ${
+        className={`mobile-nav-container fixed bottom-0 left-0 right-0 border-t border-zinc-200 dark:border-zinc-700 z-50 transform transition-transform duration-300 ease-in-out shadow-elevated glass-morphism dark:glass-morphism-dark ${
           isInputFocused ? 'translate-y-full' : 'translate-y-0'
         }`}
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)', paddingTop: '8px' }}
       >
-      <div className="flex items-center justify-around py-1">
+      <div className="flex items-center justify-around">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

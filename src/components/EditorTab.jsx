@@ -23,10 +23,7 @@ function EditorTab({
   onSessionInactive,
   onReplaceTemporarySession,
   onNavigateToSession,
-  onShowSettings,
-  autoExpandTools,
-  showRawParameters,
-  autoScrollToBottom
+  onShowSettings
 }) {
   // State for managing open files and active file
   const [openFiles, setOpenFiles] = useState([]);
@@ -190,7 +187,7 @@ function EditorTab({
   }, [selectedProject]);
 
   return (
-    <div className="flex h-full glass-morphism dark:glass-morphism-dark">
+    <div className="flex h-full glass-morphism dark:glass-morphism-dark ios-top-safe">
       {/* File Tree - Narrower to make room for chat sidebar */}
       <div className="w-1/5 border-r border-zinc-200 dark:border-zinc-700">
         <EditorFileTree
@@ -237,9 +234,6 @@ function EditorTab({
         onReplaceTemporarySession={onReplaceTemporarySession}
         onNavigateToSession={onNavigateToSession}
         onShowSettings={onShowSettings}
-        autoExpandTools={autoExpandTools}
-        showRawParameters={showRawParameters}
-        autoScrollToBottom={autoScrollToBottom}
         isIntegrated={true}
       />
     </div>

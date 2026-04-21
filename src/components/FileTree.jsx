@@ -16,10 +16,10 @@ function FileTree({ selectedProject }) {
   const [viewMode, setViewMode] = useState('detailed'); // 'simple', 'detailed', 'compact'
 
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedProject?.name) {
       fetchFiles();
     }
-  }, [selectedProject]);
+  }, [selectedProject?.name]);
 
   // Load view mode preference from localStorage
   useEffect(() => {
@@ -30,6 +30,7 @@ function FileTree({ selectedProject }) {
   }, []);
 
   const fetchFiles = async () => {
+    if (!selectedProject?.name || loading) return;
     setLoading(true);
     try {
       const response = await api.getFiles(selectedProject.name);
@@ -116,20 +117,24 @@ function FileTree({ selectedProject }) {
               toggleDirectory(item.path);
             } else if (isImageFile(item.name)) {
               // Open image in viewer
-              setSelectedImage({
-                name: item.name,
-                path: item.path,
-                projectPath: selectedProject.path,
-                projectName: selectedProject.name
-              });
+              if (selectedProject) {
+                setSelectedImage({
+                  name: item.name,
+                  path: item.path,
+                  projectPath: selectedProject.path,
+                  projectName: selectedProject.name
+                });
+              }
             } else {
               // Open file in editor
-              setSelectedFile({
-                name: item.name,
-                path: item.path,
-                projectPath: selectedProject.path,
-                projectName: selectedProject.name
-              });
+              if (selectedProject) {
+                setSelectedFile({
+                  name: item.name,
+                  path: item.path,
+                  projectPath: selectedProject.path,
+                  projectName: selectedProject.name
+                });
+              }
             }
           }}
         >
@@ -321,7 +326,7 @@ function FileTree({ selectedProject }) {
   return (
     <div className="h-full flex flex-col bg-card">
       {/* View Mode Toggle */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
+      <div className="p-4 border-b border-border flex items-center justify-between ios-top-safe">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-medium text-foreground">Files</h3>
           {loading && <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />}

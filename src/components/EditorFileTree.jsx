@@ -100,12 +100,13 @@ function EditorFileTree({ selectedProject, onFileSelect, openFiles = [] }) {
   }, []);
 
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedProject?.name) {
       fetchFiles();
     }
-  }, [selectedProject]);
+  }, [selectedProject?.name]);
 
   const fetchFiles = async () => {
+    if (!selectedProject?.name || loading) return;
     setLoading(true);
     try {
       const response = await api.getFiles(selectedProject.name);
