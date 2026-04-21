@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="public/logo-n.png" alt="Gemini CLI Web UI" width="80" height="80">
   <h1>Gemini CLI Web UI</h1>
   <p><strong>A modern, full-stack autonomous engineering interface for Google Gemini CLI</strong></p>
 
